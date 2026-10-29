@@ -1,14 +1,14 @@
 import json
 import os
 import secrets
-import shutil
 import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
@@ -76,21 +76,18 @@ PAGE = """<!doctype html><html lang="my"><head><meta charset="utf-8">
 <style>body{font-family:system-ui,sans-serif;background:#101827;color:#eef2ff;margin:0}
 main{max-width:720px;margin:6vh auto;padding:22px}.panel{background:#1c293d;padding:24px;border-radius:18px}
 p{line-height:1.7;color:#cbd5e1}input,button{box-sizing:border-box;width:100%;padding:14px;margin:10px 0;border-radius:10px}
-button{background:#38bdf8;color:#082f49;font-weight:700;border:0}button:disabled{opacity:.5}
+input{background:#fff;color:#111827;border:0}button{background:#38bdf8;color:#082f49;font-weight:700;border:0}button:disabled{opacity:.5}
 a{color:#7dd3fc}#status{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body>
 <main><section class="panel"><h1>🎬 Video MMSUB</h1>
-<p>Video Upload လုပ်ပြီး Generate နှိပ်ပါ။ GitHub က Video ကို Download ဆွဲ၊ မြန်မာစာတန်းထိုးပြီး ဒီနေရာကို ပြန်ပို့ပေးမယ်။</p>
-<form id="upload"><input id="video" type="file" accept="video/*,.mkv,.avi,.mov,.webm" required>
-<button id="uploadBtn">၁။ Video Upload</button></form>
-<button id="generateBtn" hidden>၂။ Generate</button><p id="status"></p><p id="download"></p>
-<p>ဖိုင်တစ်ခု အများဆုံး 5 GiB။ GitHub Actions အချိန်နှင့် runner disk ကန့်သတ်ချက်များ ရှိနိုင်ပါတယ်။</p>
+<p>Google Drive ထဲက Video URL ကို ထည့်ပြီး Generate နှိပ်ပါ။ Drive sharing ကို “Anyone with the link” ထားပါ။ GitHub က Video ကိုယူပြီး မြန်မာစာတန်းထိုးကာ ဒီ Website ကို ပြန်ပို့ပေးမယ်။</p>
+<form id="form"><input id="driveUrl" type="url" placeholder="Google Drive video URL ထည့်ပါ" required>
+<button id="generateBtn">မြန်မာစာတန်းထိုး Generate</button></form><p id="status"></p><p id="download"></p>
+<p>မှတ်ချက် — Output ပြန်ပို့ရန် Website Tunnel အလုပ်လုပ်နေရပါမယ်။</p>
 </section></main><script>
-const form=document.getElementById('upload'),file=document.getElementById('video'),up=document.getElementById('uploadBtn'),gen=document.getElementById('generateBtn'),status=document.getElementById('status'),dl=document.getElementById('download');let job='';
-form.onsubmit=async e=>{e.preventDefault();up.disabled=true;status.textContent='Upload တင်နေပါတယ်…';dl.textContent='';gen.hidden=true;try{let d=new FormData();d.append('video',file.files[0]);let r=await fetch('/upload',{method:'POST',body:d}),j=await r.json();if(!r.ok)throw Error(j.detail||'Upload failed');job=j.job_id;status.textContent='Upload ပြီးပါပြီ။ Generate နှိပ်ပါ။';gen.hidden=false;}catch(x){status.textContent=x.message;}finally{up.disabled=false;}};
-gen.onclick=async()=>{gen.disabled=true;status.textContent='GitHub Workflow စတင်နေပါတယ်…';try{let r=await fetch('/generate/'+job,{method:'POST'}),j=await r.json();if(!r.ok)throw Error(j.detail||'Generate failed');poll();}catch(x){status.textContent=x.message;gen.disabled=false;}};
+const form=document.getElementById('form'),url=document.getElementById('driveUrl'),gen=document.getElementById('generateBtn'),status=document.getElementById('status'),dl=document.getElementById('download');let job='';
+form.onsubmit=async e=>{e.preventDefault();gen.disabled=true;status.textContent='GitHub Workflow စတင်နေပါတယ်…';dl.textContent='';try{let r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({drive_url:url.value.trim()})}),j=await r.json();if(!r.ok)throw Error(j.detail||'Generate failed');job=j.job_id;poll();}catch(x){status.textContent=x.message;gen.disabled=false;}};
 async function poll(){try{let r=await fetch('/status/'+job),j=await r.json();status.textContent=j.message+'\\nStatus: '+j.status;if(j.status==='completed'){let a=document.createElement('a');a.href=j.download_url;a.textContent='မြန်မာစာတန်းထိုး Video Download';dl.replaceChildren(a);gen.disabled=false;return;}if(j.status==='failed'){status.textContent+='\\n'+(j.error||'Workflow failed');gen.disabled=false;return;}setTimeout(poll,5000);}catch(e){status.textContent='Status စစ်မရပါ: '+e.message;gen.disabled=false;}}
 </script></body></html>"""
-
 
 app = FastAPI(title="Video MMSUB", docs_url=None, redoc_url=None)
 
@@ -100,74 +97,33 @@ def home(_: str = Depends(login)):
     return PAGE
 
 
-@app.post("/upload")
-async def upload(video: UploadFile = File(...), _: str = Depends(login)):
-    suffix = Path(video.filename or "").suffix.lower()
-    if suffix not in {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}:
-        raise HTTPException(400, "MP4, MKV, MOV, AVI, WEBM ဖိုင်များသာ လက်ခံပါတယ်။")
-    job_id = uuid.uuid4().hex
-    folder = JOBS_DIR / job_id
-    folder.mkdir(parents=True)
-    source_name = "input" + suffix
-    path = folder / source_name
-    size = 0
+@app.post("/generate")
+async def generate(request: Request, _: str = Depends(login)):
     try:
-        with path.open("wb") as out:
-            while True:
-                chunk = await video.read(1024 * 1024)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > MAX_BYTES:
-                    raise HTTPException(413, "Video 5 GiB ထက် မကြီးရပါ။")
-                out.write(chunk)
+        payload = await request.json()
+        drive_url = str(payload.get("drive_url", "")).strip()
     except Exception:
-        shutil.rmtree(folder, ignore_errors=True)
-        raise
-    finally:
-        await video.close()
+        raise HTTPException(400, "Google Drive URL ထည့်ပါ။")
+    parsed = urlparse(drive_url)
+    if parsed.scheme != "https" or parsed.hostname not in {"drive.google.com", "www.drive.google.com", "docs.google.com"}:
+        raise HTTPException(400, "Google Drive URL မှန်မှန်ထည့်ပါ။")
+    job_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc).isoformat()
-    jobs[job_id] = {"job_id": job_id, "status": "uploaded", "progress": 0,
-                    "message": "Upload ပြီးပါပြီ။ Generate နှိပ်ပါ။", "created_at": now,
-                    "updated_at": now, "source_name": source_name,
-                    "source_token": secrets.token_urlsafe(32),
-                    "callback_token": secrets.token_urlsafe(32), "download_url": None}
-    return {"job_id": job_id, "status": "uploaded"}
-
-
-@app.post("/generate/{job_id}")
-def generate(job_id: str, request: Request, _: str = Depends(login)):
-    job = jobs.get(job_id)
-    if not job:
-        raise HTTPException(404, "Job မတွေ့ပါ။ Server restart ဖြစ်ထားနိုင်ပါတယ်။")
-    if job["status"] != "uploaded":
-        raise HTTPException(409, "ဒီ Job ကို စတင်ပြီးသားပါ။")
+    jobs[job_id] = {"job_id": job_id, "status": "queued", "progress": 0,
+                    "message": "GitHub Workflow စတင်နေပါတယ်…", "created_at": now,
+                    "updated_at": now, "callback_token": secrets.token_urlsafe(32),
+                    "download_url": None}
     base = public_base(request).rstrip("/")
-    inputs = {"job_id": job_id,
-              "video_url": f"{base}/source/{job_id}?token={job['source_token']}",
+    inputs = {"job_id": job_id, "video_url": drive_url,
               "callback_url": f"{base}/callback/{job_id}",
-              "callback_token": job["callback_token"]}
-    patch_job(job_id, status="queued", message="GitHub Workflow စတင်နေပါတယ်…")
+              "callback_token": jobs[job_id]["callback_token"]}
     try:
         trigger(inputs)
     except Exception:
-        patch_job(job_id, status="uploaded", message="Workflow မစတင်နိုင်ပါ။ GitHub Token/URL ကိုစစ်ပါ။")
+        patch_job(job_id, status="failed", message="Workflow မစတင်နိုင်ပါ။ GitHub Token/URL ကိုစစ်ပါ။")
         raise
-    patch_job(job_id, status="processing", message="GitHub က Video ကို Download ဆွဲပြီး စာတန်းထိုးနေပါတယ်…")
-    return {"status": "processing"}
-
-
-@app.get("/source/{job_id}")
-def source(job_id: str, token: str):
-    job = jobs.get(job_id)
-    if not job or not secrets.compare_digest(token, job["source_token"]):
-        raise HTTPException(404, "Video URL မမှန်ပါ။")
-    if job["status"] not in {"queued", "processing"}:
-        raise HTTPException(404, "ဒီ Video URL ကို အသုံးမပြုနိုင်တော့ပါ။")
-    path = JOBS_DIR / job_id / job["source_name"]
-    if not path.is_file():
-        raise HTTPException(404, "Video မတွေ့ပါ။")
-    return FileResponse(path, filename=job["source_name"])
+    patch_job(job_id, status="processing", message="Google Drive က Video ကိုယူပြီး စာတန်းထိုးနေပါတယ်…")
+    return {"job_id": job_id, "status": "processing"}
 
 
 @app.get("/status/{job_id}")
