@@ -18,9 +18,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: pip install -r requirements.txt
       - name: Compile Python
-        run: python -m compileall -q app
+        run: python -m compileall -q app scripts
       - name: Validate Docker build
         run: docker build -t video-mmsub:ci .
