@@ -1,4 +1,4 @@
-name: Video to SRT or Add Styled SRT Track to MKV
+name: Video to SRT or Burn Gold SRT into MP4
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       srt_url:
-        description: Optional SRT URL; when supplied add it as a selectable subtitle track
+        description: Optional SRT URL; when supplied burn subtitles into the video
         required: false
         type: string
 
@@ -80,11 +80,11 @@ jobs:
           curl --fail --location --retry 3 --retry-delay 2 "$SRT_URL" --output input.srt
           test -s input.srt
           grep -q -- '-->' input.srt
-      - name: Add supplied SRT as a styled selectable track in MKV
+      - name: Burn supplied SRT into video with gold size-30 subtitles
         if: ${{ inputs.srt_url != '' }}
         run: |
-          python scripts/process_video.py add-srt input-video.mp4 input.srt output.mkv
-          test -s output.mkv
+          python scripts/process_video.py burn-srt input-video.mp4 input.srt output.mp4
+          test -s output.mp4
       - name: Publish output
         env:
           GH_TOKEN: ${{ github.token }}
@@ -93,7 +93,7 @@ jobs:
           SRT_URL: ${{ inputs.srt_url }}
         run: |
           if [ -n "$SRT_URL" ]; then
-            gh release create "mmsub-$JOB_ID" output.mkv --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "MKV with gold, enlarged, slightly raised selectable ASS subtitles. Public asset download."
+            gh release create "mmsub-$JOB_ID" output.mp4 --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "MP4 with gold size-30 Burmese subtitles burned into video. Public asset download."
           else
             gh release create "mmsub-$JOB_ID" output.srt --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "Source-language speech transcription as SRT. Temporary video is not included."
           fi
