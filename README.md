@@ -40,3 +40,15 @@ The first transcription downloads the selected Whisper model and can take time. 
 ## GitHub Actions
 
 The CI workflow installs Python dependencies, compiles the app, and builds the Docker image. It does not host the app or store uploaded videos.
+
+
+## Start only when needed (automatic 30-minute shutdown)
+
+On a Linux server with Docker Compose installed, run:
+
+```bash
+chmod +x start-30-minutes.sh
+./start-30-minutes.sh
+```
+
+The script builds/starts the app, waits 30 minutes after startup, then stops the app container. Run it again to start the website when you need it. Keep this terminal/session alive while the timer runs. **Any video still processing when the 30-minute timer ends will be interrupted**, so download finished results before shutdown. The persistent Docker volume keeps files on disk, but in-memory job status is lost after the app restarts.
