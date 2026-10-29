@@ -39,7 +39,7 @@ jobs:
           fc-cache -f -v
           fc-match "Noto Sans Myanmar"
       - name: Install Python dependencies
-        run: pip install -r requirements.txt yt-dlp
+        run: pip install -r requirements.txt 'yt-dlp[default,curl-cffi]'
       - name: Validate URLs
         env:
           VIDEO_URL: ${{ inputs.video_url }}
@@ -60,7 +60,7 @@ jobs:
         env:
           VIDEO_URL: ${{ inputs.video_url }}
         run: |
-          yt-dlp --no-playlist --force-overwrites -f "bv*+ba/b" --merge-output-format mp4 -o "input-video.%(ext)s" "$VIDEO_URL"
+          yt-dlp --extractor-args "generic:impersonate" --no-playlist --force-overwrites -f "bv*+ba/b" --merge-output-format mp4 -o "input-video.%(ext)s" "$VIDEO_URL"
           if [ ! -f input-video.mp4 ]; then
             FILE="$(find . -maxdepth 1 -type f -name 'input-video.*' -print -quit)"
             if [ -z "$FILE" ]; then echo "No downloaded video found"; exit 1; fi
