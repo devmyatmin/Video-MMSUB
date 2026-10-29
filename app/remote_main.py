@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 APP_USERNAME = os.getenv("APP_USERNAME", "owner")
@@ -80,7 +80,7 @@ button:disabled{opacity:.5}#status{white-space:pre-wrap;overflow-wrap:anywhere}<
 </section></main><script>
 const form=document.getElementById('form'),url=document.getElementById('videoUrl'),gen=document.getElementById('generateBtn'),status=document.getElementById('status'),dl=document.getElementById('download');let job='';
 form.onsubmit=async e=>{e.preventDefault();gen.disabled=true;status.textContent='GitHub Workflow စတင်နေပါတယ်…';dl.replaceChildren();try{let r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video_url:url.value.trim()})}),j=await r.json();if(!r.ok)throw Error(j.detail||'Generate failed');job=j.job_id;poll();}catch(x){status.textContent=x.message;gen.disabled=false;}};
-async function poll(){try{let r=await fetch('/status/'+job),j=await r.json();status.textContent=j.message+'\\nStatus: '+j.status;if(j.status==='completed'){let a=document.createElement('a');a.href=j.download_url;a.textContent='⬇ One-click Download MP4';a.className='download';a.target='_blank';a.rel='noopener';dl.replaceChildren(a);gen.disabled=false;return;}if(j.status==='failed'){status.textContent+='\\n'+(j.error||'Workflow failed');gen.disabled=false;return;}setTimeout(poll,8000);}catch(e){status.textContent='Status စစ်မရပါ: '+e.message;setTimeout(poll,10000);}}
+async function poll(){try{let r=await fetch('/status/'+job),j=await r.json();status.textContent=j.message+'\\nStatus: '+j.status;if(j.status==='completed'){let a=document.createElement('a');a.href='/download/'+job;a.textContent='⬇ One-click Download MP4';a.className='download';a.target='_blank';a.rel='noopener';dl.replaceChildren(a);gen.disabled=false;return;}if(j.status==='failed'){status.textContent+='\\n'+(j.error||'Workflow failed');gen.disabled=false;return;}setTimeout(poll,8000);}catch(e){status.textContent='Status စစ်မရပါ: '+e.message;setTimeout(poll,10000);}}
 </script></body></html>"""
 
 app = FastAPI(title="Video MMSUB", docs_url=None, redoc_url=None)
@@ -137,3 +137,14 @@ def status(job_id: str, _: str = Depends(login)):
                           message="Processing မအောင်မြင်ပါ။ GitHub Actions logs ကို စစ်ပါ။",
                           error="GitHub Actions workflow failed. Check the Actions run logs.")
     return {k: v for k, v in job.items() if k not in {"callback_token", "source_token"}}
+
+
+@app.get("/download/{job_id}")
+def download(job_id: str, _: str = Depends(login)):
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job မတွေ့ပါ။ Server restart ဖြစ်ထားနိုင်ပါတယ်။")
+    if job.get("status") != "completed" or not job.get("download_url"):
+        raise HTTPException(409, "MP4 မပြီးသေးပါ။ Saver စာမျက်နှာကို ပြန်စစ်ပါ။")
+    # Public GitHub Release assets do not require a GitHub account.
+    return RedirectResponse(url=job["download_url"], status_code=302)
