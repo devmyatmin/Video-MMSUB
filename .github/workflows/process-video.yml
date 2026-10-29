@@ -1,4 +1,4 @@
-name: Process Video to Burmese Subtitles
+name: Video to SRT or Burn SRT into MP4
 
 on:
   workflow_dispatch:
@@ -8,13 +8,16 @@ on:
         required: true
         type: string
       video_url:
-        description: Direct video URL or supported website video URL
+        description: Video URL
         required: true
+        type: string
+      srt_url:
+        description: Optional SRT URL; when supplied burn it into MP4
+        required: false
         type: string
 
 permissions:
   contents: write
-
 concurrency:
   group: video-mmsub-${{ inputs.job_id }}
   cancel-in-progress: false
@@ -29,56 +32,73 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install system tools
+      - name: Install FFmpeg and subtitle fonts
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra fonts-noto-cjk
       - name: Install Python dependencies
         run: pip install -r requirements.txt yt-dlp
-      - name: Validate and download video URL
+      - name: Validate URLs
         env:
           VIDEO_URL: ${{ inputs.video_url }}
+          SRT_URL: ${{ inputs.srt_url }}
         run: |
           python - <<'PY'
           import os
           from urllib.parse import urlparse
-          u = urlparse(os.environ["VIDEO_URL"])
-          if u.scheme not in {"http", "https"} or not u.hostname:
-              raise SystemExit("Enter a valid http:// or https:// video URL")
-          if u.username or u.password:
-              raise SystemExit("URLs containing embedded credentials are not accepted")
+          for name in ("VIDEO_URL", "SRT_URL"):
+              value = os.environ.get(name, "").strip()
+              if not value and name == "SRT_URL":
+                  continue
+              u = urlparse(value)
+              if u.scheme not in {"http", "https"} or not u.hostname or u.username or u.password:
+                  raise SystemExit(f"{name} must be a valid http/https URL")
           PY
+      - name: Download video
+        env:
+          VIDEO_URL: ${{ inputs.video_url }}
+        run: |
           yt-dlp --no-playlist --force-overwrites -f "bv*+ba/b" --merge-output-format mp4 -o "input-video.%(ext)s" "$VIDEO_URL"
-          if [ -f input-video.mp4 ]; then
-            echo "Video downloaded as input-video.mp4"
-          else
+          if [ ! -f input-video.mp4 ]; then
             FILE="$(find . -maxdepth 1 -type f -name 'input-video.*' -print -quit)"
-            if [ -z "$FILE" ]; then
-              echo "No downloaded video file found"
-              exit 1
-            fi
+            if [ -z "$FILE" ]; then echo "No downloaded video found"; exit 1; fi
             mv "$FILE" input-video.mp4
           fi
-      - name: Transcribe, translate and burn subtitles
-        run: python scripts/process_video.py input-video.mp4 output.mp4
-      - name: Publish MP4 as a direct GitHub download
+      - name: Transcribe to source-language SRT
+        if: ${{ inputs.srt_url == '' }}
+        run: |
+          python scripts/process_video.py transcribe input-video.mp4 output.srt
+          test -s output.srt
+      - name: Download supplied SRT
+        if: ${{ inputs.srt_url != '' }}
+        env:
+          SRT_URL: ${{ inputs.srt_url }}
+        run: |
+          curl --fail --location --retry 3 --retry-delay 2 "$SRT_URL" --output input.srt
+          test -s input.srt
+          grep -q -- '-->' input.srt
+      - name: Burn supplied SRT into MP4
+        if: ${{ inputs.srt_url != '' }}
+        run: |
+          python scripts/process_video.py burn input-video.mp4 input.srt output.mp4
+          test -s output.mp4
+      - name: Publish output
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           JOB_ID: ${{ inputs.job_id }}
+          SRT_URL: ${{ inputs.srt_url }}
         run: |
-          gh release create "mmsub-$JOB_ID" output.mp4 \
-            --repo "$GH_REPO" \
-            --title "Video MMSUB $JOB_ID" \
-            --notes "Video-MMSUB output. Direct MP4 download is available in release assets."
-      - name: Publish failure marker for website status
+          if [ -n "$SRT_URL" ]; then
+            gh release create "mmsub-$JOB_ID" output.mp4 --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "MP4 with supplied SRT burned in. Public asset download."
+          else
+            gh release create "mmsub-$JOB_ID" output.srt --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "Source-language speech transcription as SRT. Temporary video is not included."
+          fi
+      - name: Publish failure marker
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           JOB_ID: ${{ inputs.job_id }}
         run: |
-          gh release create "mmsub-$JOB_ID" \
-            --repo "$GH_REPO" \
-            --title "Video MMSUB $JOB_ID - failed" \
-            --notes "PROCESSING_FAILED: Check the GitHub Actions run logs for the error." || true
+          gh release create "mmsub-$JOB_ID" --repo "$GH_REPO" --title "Video MMSUB $JOB_ID - failed" --notes "PROCESSING_FAILED: Check GitHub Actions logs." || true
