@@ -36,6 +36,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra fonts-noto-cjk
+          fc-cache -f
+          echo "Myanmar font match:"
+          fc-match "Noto Sans Myanmar"
       - name: Install Python dependencies
         run: pip install -r requirements.txt yt-dlp
       - name: Validate URLs
