@@ -1,4 +1,4 @@
-name: Video to SRT or Burn SRT into MP4
+name: Video to SRT or Add SRT Track to MP4
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       srt_url:
-        description: Optional SRT URL; when supplied burn it into MP4
+        description: Optional SRT URL; when supplied add it as a selectable subtitle track
         required: false
         type: string
 
@@ -32,13 +32,10 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install FFmpeg and subtitle fonts
+      - name: Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra fonts-noto-cjk
-          fc-cache -f
-          echo "Myanmar font match:"
-          fc-match "Noto Sans Myanmar"
+          sudo apt-get install -y ffmpeg
       - name: Install Python dependencies
         run: pip install -r requirements.txt yt-dlp
       - name: Validate URLs
@@ -83,10 +80,10 @@ jobs:
           curl --fail --location --retry 3 --retry-delay 2 "$SRT_URL" --output input.srt
           test -s input.srt
           grep -q -- '-->' input.srt
-      - name: Burn supplied SRT into MP4
+      - name: Add supplied SRT as a selectable track in MP4
         if: ${{ inputs.srt_url != '' }}
         run: |
-          python scripts/process_video.py burn input-video.mp4 input.srt output.mp4
+          python scripts/process_video.py add-srt input-video.mp4 input.srt output.mp4
           test -s output.mp4
       - name: Publish output
         env:
@@ -96,7 +93,7 @@ jobs:
           SRT_URL: ${{ inputs.srt_url }}
         run: |
           if [ -n "$SRT_URL" ]; then
-            gh release create "mmsub-$JOB_ID" output.mp4 --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "MP4 with supplied SRT burned in. Public asset download."
+            gh release create "mmsub-$JOB_ID" output.mp4 --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "MP4 with supplied SRT as a selectable subtitle track. Public asset download."
           else
             gh release create "mmsub-$JOB_ID" output.srt --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "Source-language speech transcription as SRT. Temporary video is not included."
           fi
