@@ -106,6 +106,27 @@ def normalize_myanmar_srt(text):
     return text
 
 
+def get_video_dimensions(source):
+    """Return the first video stream's width and height using ffprobe."""
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=s=x:p=0", str(source),
+        ],
+        capture_output=True, text=True,
+    )
+    if result.returncode:
+        raise RuntimeError((result.stderr or "Could not read video dimensions.")[-2000:])
+    try:
+        width, height = (int(value) for value in result.stdout.strip().split("x", 1))
+    except (ValueError, TypeError):
+        raise RuntimeError("Could not determine the input video's dimensions.")
+    if width <= 0 or height <= 0:
+        raise RuntimeError("Input video has invalid dimensions.")
+    return width, height
+
+
 def burn_srt_into_video(source, srt_path, output):
     source, srt_path, output = (
         Path(source).resolve(), Path(srt_path).resolve(), Path(output).resolve()
@@ -124,10 +145,19 @@ def burn_srt_into_video(source, srt_path, output):
         str(srt_path).replace("\\", "\\\\")
         .replace(":", "\\:").replace("'", "\\'")
     )
-    vf = (
-        f"subtitles='{escaped}':"
-        "force_style='FontName=Noto Sans Myanmar,FontSize=26,PrimaryColour=&H0000D7FF,OutlineColour=&H00000000,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
+    # Match player-style subtitle sizing by scaling with the video height,
+    # instead of applying the same tiny fixed font size to every resolution.
+    _, video_height = get_video_dimensions(source)
+    font_size = max(28, min(64, round(video_height * 0.05)))
+    outline = max(2, round(font_size * 0.075))
+    margin_v = max(24, round(video_height * 0.025))
+    force_style = (
+        "FontName=Noto Sans Myanmar,"
+        f"FontSize={font_size},"
+        "PrimaryColour=&H0000D7FF,OutlineColour=&H00000000,"
+        f"Outline={outline},Shadow=1,Alignment=2,MarginV={margin_v}"
     )
+    vf = f"subtitles='{escaped}':force_style='{force_style}'"
     run([
         "ffmpeg", "-y", "-i", str(source), "-vf", vf,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
