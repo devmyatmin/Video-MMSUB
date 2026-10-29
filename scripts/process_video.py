@@ -29,7 +29,15 @@ def main(source, output):
     run(["ffmpeg", "-y", "-i", str(source), "-vn", "-ac", "1", "-ar", "16000",
          "-c:a", "pcm_s16le", str(audio)])
     model = WhisperModel("small", device="cpu", compute_type="int8")
-    segments, _info = model.transcribe(str(audio), beam_size=5, vad_filter=True)
+    # Auto-detect the spoken language. English and Japanese are the primary expected
+    # source languages, but leave detection automatic so other languages still work.
+    segments, info = model.transcribe(
+        str(audio), language=None, beam_size=5, vad_filter=True
+    )
+    detected_language = getattr(info, "language", "unknown")
+    print(f"Detected source language: {detected_language}")
+    if detected_language in {"en", "ja"}:
+        print("Primary source language detected (English/Japanese).")
     segments = list(segments)
     if not segments:
         # VAD can mistakenly discard quiet or noisy speech; retry without VAD.
