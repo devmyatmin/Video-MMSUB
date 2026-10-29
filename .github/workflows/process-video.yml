@@ -35,7 +35,9 @@ jobs:
       - name: Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg fontconfig fonts-noto-core fonts-noto-extra
+          fc-cache -f -v
+          fc-match "Noto Sans Myanmar"
       - name: Install Python dependencies
         run: pip install -r requirements.txt yt-dlp
       - name: Validate URLs
