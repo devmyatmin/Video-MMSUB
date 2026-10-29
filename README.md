@@ -1,54 +1,65 @@
 # Video MMSUB
 
-Password-protected web app that accepts a video, transcribes its audio with Faster-Whisper, translates detected speech to Burmese, burns Burmese subtitles into an MP4, and offers the result for download.
+Password-protected web app hosted on your phone/Termux. Upload a video, press Generate, and GitHub Actions downloads the video through a one-time URL, transcribes and translates speech to Burmese, burns subtitles into an MP4, then uploads the result back to the phone server.
 
-## Features
+## How it works
 
-- HTTP Basic authentication protects the web UI, upload, status, and download endpoints.
-- Audio transcription using Faster-Whisper.
-- Automatic translation to Burmese using Google Translate via deep-translator.
-- Hard-subtitled MP4 output using FFmpeg.
-- Docker deployment with a persistent data volume.
-- Maximum upload size: 5 GiB (5 × 1024³ bytes) per video; no app-defined video-duration limit.
+1. Termux runs the web app; expose it through a public HTTPS tunnel while you use it.
+2. The app accepts a video (up to 5 GiB), stores it on the phone, and returns a job ID.
+3. Press Generate. The server dispatches `.github/workflows/process-video.yml` using a GitHub token stored only in the server environment.
+4. GitHub Actions downloads the one-time video URL, processes the video, and POSTs the output back to the phone's public callback URL.
+5. The web page shows a download link when processing completes.
 
-## Deploy on a server
+The workflow is separate from `.github/workflows/ci.yml`; CI only validates the repository.
 
-This repository contains the app and CI workflow; it does **not** automatically provision a public server. Deploy the Docker image to a server/host that supports persistent storage and long-running CPU workloads.
+## GitHub token setup
 
-1. Install Docker Engine and Docker Compose on the server.
-2. Copy this repository to the server.
-3. Copy .env.example to .env and set a strong unique APP_PASSWORD.
-4. Run docker compose up -d --build.
-5. Open http://SERVER-HOST:8000 and sign in with APP_USERNAME / APP_PASSWORD.
+Create a fine-grained personal access token for this repository with **Actions: Read and write** permission. The token is used by the server to dispatch the workflow. Do not paste it into browser JavaScript, commit it to Git, or share it with friends. If it is exposed, revoke it and create a new one.
 
-For internet-facing use, put it behind HTTPS (for example, Caddy or a managed reverse proxy). Do not expose the app over plain HTTP on the public internet because HTTP Basic credentials are not encrypted without TLS.
+## Android Termux setup
 
-## Model and resource sizing
+Install Termux from a trusted source such as F-Droid or the official Termux GitHub releases. In Termux:
 
-The first transcription downloads the selected Whisper model and can take time. Set WHISPER_MODEL to tiny, base, small, medium, or large-v3 depending on available RAM and CPU. Larger models may improve transcription but use more resources. The default is small, CPU, int8.
-
-## Important limits and current implementation notes
-
-- The app rejects an individual video upload larger than 5 GiB. This is a per-file app limit, not a guarantee that every 5 GiB upload will work: disk capacity, RAM, CPU, request timeouts, network/proxy limits, and the host's policies still apply. Configure any reverse proxy/server request-body limit to allow at least 5 GiB, or it may reject uploads earlier. Video duration has no app-defined hard limit, but processing resources still apply.
-- The job queue and status records are currently in memory. If the app process restarts, active jobs/status records are lost; use a persistent queue/database before relying on it for production workloads.
-- Processing is CPU-intensive. This starter app handles one server process; for multiple simultaneous users, move jobs to a worker queue and add per-user quotas/cleanup.
-- Translation uses an unofficial Google Translate wrapper and can be rate-limited or change without notice.
-- Translation quality and subtitle timing vary with audio quality, background music, accents, and overlapping speech.
-- Uploads and generated files remain on the server volume until manually cleaned up. Protect and back up the server appropriately.
-- Only upload content you own or have permission to process.
-
-## GitHub Actions
-
-The CI workflow installs Python dependencies, compiles the app, and builds the Docker image. It does not host the app or store uploaded videos.
-
-
-## Start only when needed (automatic 30-minute shutdown)
-
-On a Linux server with Docker Compose installed, run:
-
-```bash
-chmod +x start-30-minutes.sh
-./start-30-minutes.sh
+```sh
+pkg update && pkg upgrade -y
+pkg install python git nano -y
+termux-setup-storage
+git clone https://github.com/devmyatmin/Video-MMSUB.git
+cd Video-MMSUB
+python -m venv .venv
+. .venv/bin/activate
+pip install -r requirements-termux.txt
+cp .env.example .env
+nano .env
 ```
 
-The script builds/starts the app, waits 30 minutes after startup, then stops the app container. Run it again to start the website when you need it. Keep this terminal/session alive while the timer runs. **Any video still processing when the 30-minute timer ends will be interrupted**, so download finished results before shutdown. The persistent Docker volume keeps files on disk, but in-memory job status is lost after the app restarts.
+Edit `.env` and set:
+- `APP_USERNAME` and a strong `APP_PASSWORD`
+- `GITHUB_TOKEN` to the fine-grained token above
+- `PUBLIC_BASE_URL` to the public HTTPS tunnel URL for this phone
+
+Load the settings and start the app:
+
+```sh
+set -a
+. ./.env
+set +a
+uvicorn app.remote_main:app --host 0.0.0.0 --port 8000
+```
+
+Open `http://127.0.0.1:8000` on the phone to test it. The public URL must be an HTTPS URL that can reach port 8000 through your tunnel. Keep Termux and the tunnel running while GitHub downloads the source and uploads the result. If the public tunnel URL changes, update `PUBLIC_BASE_URL`, reload the environment, and restart the app.
+
+## Public access and 30-minute use
+
+A tunnel such as Cloudflare Tunnel can expose the local port; the app itself does not create a public URL. A stable custom tunnel URL generally requires configuring the tunnel provider. A temporary tunnel URL can change between sessions.
+
+If you use a 30-minute auto-stop timer, the phone server must remain online until GitHub has downloaded the source and returned the finished MP4. A job still running when the phone server stops will fail to send its output back. Android battery optimization can also kill Termux; keep the phone charging and allow background activity.
+
+## Limits and security
+
+- The app accepts at most 5 GiB per input and output. GitHub-hosted runner disk space, network speed, processing time, Actions usage limits, and the phone's free storage may impose lower practical limits.
+- The phone needs enough free storage for the original and output video. Output files remain on the phone until manually deleted.
+- Job status is kept in memory. Restarting the app loses the page's job status even though files may remain on disk.
+- The one-time source URL and per-job callback token are secrets. The website password protects the user interface; the GitHub token must stay on the server.
+- HTTP Basic credentials are not encrypted over plain HTTP. Use HTTPS for public access.
+- Only upload content you have permission to process.
