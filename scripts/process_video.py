@@ -1,8 +1,6 @@
 import sys
 import subprocess
-import unicodedata
 from pathlib import Path
-import pyidaungsu as pds
 from faster_whisper import WhisperModel
 
 
@@ -45,7 +43,8 @@ def transcribe_to_srt(source, output_srt):
 
     blocks = [f"{i}\n{start} --> {end}\n{text}\n"
               for i, (start, end, text) in enumerate(entries, 1)]
-    srt_text = normalize_myanmar_srt("\n".join(blocks))
+    # Preserve Whisper output exactly; do not run Myanmar encoding detection or conversion.
+    srt_text = "\n".join(blocks)
     output_srt.write_text(srt_text, encoding="utf-8")
     audio.unlink(missing_ok=True)
     print(
@@ -70,40 +69,6 @@ def read_srt_text(path):
     print(f"Detected SRT text encoding: {encoding}")
     return text
 
-
-def normalize_myanmar_srt(text):
-    # fasttext (used by pyidaungsu) only accepts one line per predict call.
-    # Join subtitle text lines with spaces so the detector receives one line.
-    # Normalize equivalent Unicode sequences so Burmese combining marks render consistently.
-    text = unicodedata.normalize("NFC", text)
-    lines = text.splitlines()
-    candidate_lines = [
-        line for line in lines
-        if "-->" not in line and not line.strip().isdigit()
-        and any("\u1000" <= ch <= "\u109f" for ch in line)
-    ]
-    candidate = " ".join(line.strip() for line in candidate_lines)
-    if not candidate.strip():
-        print("No Myanmar-script text detected; keeping subtitle text unchanged.")
-        return text
-
-    try:
-        detected = pds.detect(candidate)
-    except Exception as exc:
-        print(f"Myanmar encoding detection failed ({exc}); preserving original text.")
-        return text
-
-    print(f"Detected Myanmar subtitle type: {detected}")
-    if detected == "mm_zg":
-        converted = unicodedata.normalize("NFC", pds.cvt2uni(text))
-        print("Converted Zawgyi subtitle text to Unicode for correct rendering.")
-        return converted
-    if detected == "mm_uni":
-        print("Subtitle text is already Unicode; preserving its wording.")
-        return text
-
-    print("Myanmar encoding detection was uncertain; preserving original text.")
-    return text
 
 
 def get_video_dimensions(source):
