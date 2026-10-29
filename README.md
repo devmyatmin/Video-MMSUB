@@ -14,7 +14,7 @@ The workflow is separate from `.github/workflows/ci.yml`; CI only validates the 
 
 ## GitHub token setup
 
-Create a fine-grained personal access token for this repository with **Actions: Read and write** permission. The token is used by the server to dispatch the workflow. Do not paste it into browser JavaScript, commit it to Git, or share it with friends. If it is exposed, revoke it and create a new one.
+Create a fine-grained personal access token for this repository with **Actions: Read and write** and **Contents: Read-only** permissions. Actions permission lets the server dispatch the workflow; Contents read lets the app check whether the output release asset is ready. Do not paste it into browser JavaScript, commit it to Git, or share it with friends. If it is exposed, revoke it and create a new one.
 
 ## Android Termux setup
 
