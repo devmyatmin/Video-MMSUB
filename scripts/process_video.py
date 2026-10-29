@@ -45,7 +45,8 @@ def transcribe_to_srt(source, output_srt):
 
     blocks = [f"{i}\n{start} --> {end}\n{text}\n"
               for i, (start, end, text) in enumerate(entries, 1)]
-    output_srt.write_text("\n".join(blocks), encoding="utf-8")
+    srt_text = normalize_myanmar_srt("\n".join(blocks))
+    output_srt.write_text(srt_text, encoding="utf-8")
     audio.unlink(missing_ok=True)
     print(
         f"Created source-language SRT with {len(entries)} entries; "
