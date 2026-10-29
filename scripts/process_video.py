@@ -71,73 +71,37 @@ def read_srt_text(path):
 
 
 
-def get_video_dimensions(source):
-    """Return the first video stream's width and height using ffprobe."""
-    result = subprocess.run(
-        [
-            "ffprobe", "-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=width,height",
-            "-of", "csv=s=x:p=0", str(source),
-        ],
-        capture_output=True, text=True,
-    )
-    if result.returncode:
-        raise RuntimeError((result.stderr or "Could not read video dimensions.")[-2000:])
-    try:
-        width, height = (int(value) for value in result.stdout.strip().split("x", 1))
-    except (ValueError, TypeError):
-        raise RuntimeError("Could not determine the input video's dimensions.")
-    if width <= 0 or height <= 0:
-        raise RuntimeError("Input video has invalid dimensions.")
-    return width, height
-
-
-def burn_srt_into_video(source, srt_path, output):
+def add_srt_track_to_video(source, srt_path, output):
+    """Mux the SRT as a selectable subtitle track; never render glyphs into video frames."""
     source, srt_path, output = (
         Path(source).resolve(), Path(srt_path).resolve(), Path(output).resolve()
     )
     if not srt_path.is_file() or not srt_path.stat().st_size:
         raise RuntimeError("The supplied SRT file is missing or empty.")
 
-    # Validate the supplied SRT, but do not normalize, convert, or rewrite it.
-    # This keeps the user's original subtitle text unchanged while testing whether
-    # Myanmar text corruption comes from the preprocessing step or FFmpeg rendering.
     subtitle_text = read_srt_text(srt_path)
     if "-->" not in subtitle_text:
         raise RuntimeError("The supplied file does not look like an SRT (missing -->).")
 
-    escaped = (
-        str(srt_path).replace("\\", "\\\\")
-        .replace(":", "\\:").replace("'", "\\'")
-    )
-    # Match player-style subtitle sizing by scaling with the video height,
-    # instead of applying the same tiny fixed font size to every resolution.
-    _, video_height = get_video_dimensions(source)
-    font_size = max(28, min(64, round(video_height * 0.05)))
-    outline = max(2, round(font_size * 0.075))
-    margin_v = max(24, round(video_height * 0.025))
-    force_style = (
-        "FontName=Noto Sans Myanmar,"
-        f"FontSize={font_size},"
-        "PrimaryColour=&H0000D7FF,OutlineColour=&H00000000,"
-        f"Outline={outline},Shadow=1,Alignment=2,MarginV={margin_v}"
-    )
-    vf = f"subtitles='{escaped}':force_style='{force_style}'"
+    # Store subtitles as text in a selectable MP4 track. Copy video/audio streams
+    # without re-encoding, leaving Myanmar glyph shaping to the video player.
     run([
-        "ffmpeg", "-y", "-i", str(source), "-vf", vf,
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
-        str(output),
+        "ffmpeg", "-y", "-i", str(source), "-i", str(srt_path),
+        "-map", "0", "-map", "1:0",
+        "-c", "copy", "-c:s", "mov_text",
+        "-metadata:s:s:0", "language=und",
+        "-metadata:s:s:0", "title=Subtitles",
+        "-movflags", "+faststart", str(output),
     ])
 
 
 if __name__ == "__main__":
     if len(sys.argv) == 4 and sys.argv[1] == "transcribe":
         transcribe_to_srt(sys.argv[2], sys.argv[3])
-    elif len(sys.argv) == 5 and sys.argv[1] == "burn":
-        burn_srt_into_video(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif len(sys.argv) == 5 and sys.argv[1] in {"add-srt", "mux-srt"}:
+        add_srt_track_to_video(sys.argv[2], sys.argv[3], sys.argv[4])
     else:
         raise SystemExit(
             "Usage: process_video.py transcribe INPUT_VIDEO OUTPUT_SRT | "
-            "burn INPUT_VIDEO INPUT_SRT OUTPUT_MP4"
+            "add-srt INPUT_VIDEO INPUT_SRT OUTPUT_MP4"
         )
