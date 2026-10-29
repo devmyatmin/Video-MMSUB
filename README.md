@@ -9,7 +9,7 @@ Password-protected web app that accepts a video, transcribes its audio with Fast
 - Automatic translation to Burmese using Google Translate via deep-translator.
 - Hard-subtitled MP4 output using FFmpeg.
 - Docker deployment with a persistent data volume.
-- No app-defined upload-size or video-duration limit.
+- Maximum upload size: 5 GiB (5 × 1024³ bytes) per video; no app-defined video-duration limit.
 
 ## Deploy on a server
 
@@ -29,7 +29,7 @@ The first transcription downloads the selected Whisper model and can take time. 
 
 ## Important limits and current implementation notes
 
-- There is no hard upload-size or duration limit in this app code. **Unlimited in practice is impossible to guarantee**: disk capacity, RAM, CPU, request timeouts, network/proxy limits, and the host's policies still apply. Large videos need a server with sufficient persistent disk and memory.
+- The app rejects an individual video upload larger than 5 GiB. This is a per-file app limit, not a guarantee that every 5 GiB upload will work: disk capacity, RAM, CPU, request timeouts, network/proxy limits, and the host's policies still apply. Configure any reverse proxy/server request-body limit to allow at least 5 GiB, or it may reject uploads earlier. Video duration has no app-defined hard limit, but processing resources still apply.
 - The job queue and status records are currently in memory. If the app process restarts, active jobs/status records are lost; use a persistent queue/database before relying on it for production workloads.
 - Processing is CPU-intensive. This starter app handles one server process; for multiple simultaneous users, move jobs to a worker queue and add per-user quotas/cleanup.
 - Translation uses an unofficial Google Translate wrapper and can be rate-limited or change without notice.
