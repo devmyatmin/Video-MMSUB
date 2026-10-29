@@ -1,6 +1,7 @@
 import sys
 import subprocess
 from pathlib import Path
+import pyidaungsu as pds
 from faster_whisper import WhisperModel
 
 
@@ -26,14 +27,9 @@ def transcribe_to_srt(source, output_srt):
         "-ar", "16000", "-c:a", "pcm_s16le", str(audio)
     ])
 
-    # Medium is more accurate than small for multilingual speech. Disable VAD
-    # filtering so quiet/short phrases are less likely to be dropped.
     model = WhisperModel("medium", device="cpu", compute_type="int8")
     segments, info = model.transcribe(
-        str(audio),
-        language=None,
-        beam_size=5,
-        vad_filter=False,
+        str(audio), language=None, beam_size=5, vad_filter=False,
         condition_on_previous_text=True,
     )
     language = getattr(info, "language", "unknown")
@@ -56,6 +52,52 @@ def transcribe_to_srt(source, output_srt):
     )
 
 
+def read_srt_text(path):
+    raw = path.read_bytes()
+    # Detect common Unicode text encodings using BOMs first.
+    if raw.startswith(b"\xef\xbb\xbf"):
+        text, encoding = raw.decode("utf-8-sig"), "UTF-8 with BOM"
+    elif raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text, encoding = raw.decode("utf-16"), "UTF-16 with BOM"
+    else:
+        try:
+            text, encoding = raw.decode("utf-8"), "UTF-8"
+        except UnicodeDecodeError as exc:
+            raise RuntimeError(
+                "SRT file encoding is not UTF-8/UTF-16. Save it as UTF-8 and retry."
+            ) from exc
+    print(f"Detected SRT text encoding: {encoding}")
+    return text
+
+
+def normalize_myanmar_srt(text):
+    # Detect the Myanmar text encoding, then convert Zawgyi to Unicode before
+    # rendering. Timestamps and subtitle numbering are preserved.
+    lines = text.splitlines()
+    candidate_indices = [
+        i for i, line in enumerate(lines)
+        if "-->" not in line and not line.strip().isdigit()
+        and any("\u1000" <= ch <= "\u109f" for ch in line)
+    ]
+    candidate = "\n".join(lines[i] for i in candidate_indices)
+    if not candidate.strip():
+        print("No Myanmar-script text detected; keeping subtitle text unchanged.")
+        return text
+
+    detected = pds.detect(candidate)
+    print(f"Detected Myanmar subtitle type: {detected}")
+    if detected == "mm_zg":
+        converted = pds.cvt2uni(text)
+        print("Converted Zawgyi subtitle text to Unicode for correct rendering.")
+        return converted
+    if detected == "mm_uni":
+        print("Subtitle text is already Unicode; preserving its wording.")
+        return text
+
+    print("Myanmar encoding detection was uncertain; preserving original text.")
+    return text
+
+
 def burn_srt_into_video(source, srt_path, output):
     source, srt_path, output = (
         Path(source).resolve(), Path(srt_path).resolve(), Path(output).resolve()
@@ -63,25 +105,17 @@ def burn_srt_into_video(source, srt_path, output):
     if not srt_path.is_file() or not srt_path.stat().st_size:
         raise RuntimeError("The supplied SRT file is missing or empty.")
 
-    # Normalize UTF-8/BOM/newlines before libass reads the subtitle file.
-    try:
-        subtitle_text = srt_path.read_text(encoding="utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise RuntimeError(
-            "SRT must be saved as UTF-8 text. Re-save the subtitle file as UTF-8."
-        ) from exc
+    subtitle_text = read_srt_text(srt_path)
     if "-->" not in subtitle_text:
         raise RuntimeError("The supplied file does not look like an SRT (missing -->).")
-    srt_path.write_text(
-        subtitle_text.replace("\r\n", "\n").replace("\r", "\n"),
-        encoding="utf-8",
-    )
+    subtitle_text = subtitle_text.replace("\r\n", "\n").replace("\r", "\n")
+    subtitle_text = normalize_myanmar_srt(subtitle_text)
+    srt_path.write_text(subtitle_text, encoding="utf-8")
 
     escaped = (
         str(srt_path).replace("\\", "\\\\")
         .replace(":", "\\:").replace("'", "\\'")
     )
-    # Noto Sans Myanmar is needed for correct Burmese glyphs/combining marks.
     vf = (
         f"subtitles='{escaped}':"
         "force_style='FontName=Noto Sans Myanmar,FontSize=22,"
