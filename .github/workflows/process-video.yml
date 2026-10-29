@@ -33,8 +33,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
-      - name: Install CPU-only PyTorch
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Install Python dependencies
         run: pip install -r requirements.txt yt-dlp
       - name: Validate and download video URL
