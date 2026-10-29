@@ -7,8 +7,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     WHISPER_DEVICE=cpu \
     WHISPER_COMPUTE_TYPE=int8
 
+# pyidaungsu depends on fasttext, which may need a C++ compiler when a wheel
+# is unavailable for the target image. Include the build toolchain for pip.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg fonts-noto-core fonts-noto-extra ca-certificates \
+    ffmpeg fonts-noto-core fonts-noto-extra fonts-noto-cjk \
+    build-essential ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
