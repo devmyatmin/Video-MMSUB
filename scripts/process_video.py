@@ -1,37 +1,10 @@
 import sys
 import subprocess
+import time
 from pathlib import Path
 
-import torch
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+from deep_translator import GoogleTranslator
 from faster_whisper import WhisperModel
-
-MODEL_NAME = "facebook/nllb-200-distilled-600M"
-TARGET_LANGUAGE = "mya_Mymr"
-
-# Map Whisper language IDs to NLLB-200 language codes.
-LANGUAGE_CODES = {
-    "af": "afr_Latn", "am": "amh_Ethi", "ar": "arb_Arab", "az": "azj_Latn",
-    "be": "bel_Cyrl", "bg": "bul_Cyrl", "bn": "ben_Beng", "bs": "bos_Latn",
-    "ca": "cat_Latn", "ceb": "ceb_Latn", "cs": "ces_Latn", "cy": "cym_Latn",
-    "da": "dan_Latn", "de": "deu_Latn", "el": "ell_Grek", "en": "eng_Latn",
-    "es": "spa_Latn", "et": "est_Latn", "fa": "pes_Arab", "fi": "fin_Latn",
-    "fr": "fra_Latn", "ga": "gle_Latn", "gl": "glg_Latn", "gu": "guj_Gujr",
-    "ha": "hau_Latn", "he": "heb_Hebr", "hi": "hin_Deva", "hr": "hrv_Latn",
-    "ht": "hat_Latn", "hu": "hun_Latn", "hy": "hye_Armn", "id": "ind_Latn",
-    "is": "isl_Latn", "it": "ita_Latn", "ja": "jpn_Jpan", "jv": "jav_Latn",
-    "ka": "kat_Geor", "kk": "kaz_Cyrl", "km": "khm_Khmr", "kn": "kan_Knda",
-    "ko": "kor_Hang", "lo": "lao_Laoo", "lt": "lit_Latn", "lv": "lvs_Latn",
-    "mk": "mkd_Cyrl", "ml": "mal_Mlym", "mn": "khk_Cyrl", "mr": "mar_Deva",
-    "ms": "zsm_Latn", "my": "mya_Mymr", "ne": "npi_Deva", "nl": "nld_Latn",
-    "no": "nob_Latn", "pa": "pan_Guru", "pl": "pol_Latn", "ps": "pbt_Arab",
-    "pt": "por_Latn", "ro": "ron_Latn", "ru": "rus_Cyrl", "si": "sin_Sinh",
-    "sk": "slk_Latn", "sl": "slv_Latn", "sq": "als_Latn", "sr": "srp_Cyrl",
-    "sv": "swe_Latn", "sw": "swh_Latn", "ta": "tam_Taml", "te": "tel_Telu",
-    "th": "tha_Thai", "tl": "tgl_Latn", "tr": "tur_Latn", "uk": "ukr_Cyrl",
-    "ur": "urd_Arab", "uz": "uzn_Latn", "vi": "vie_Latn", "yo": "yor_Latn",
-    "zh": "zho_Hans", "yue": "yue_Hant",
-}
 
 
 def run(args):
@@ -48,36 +21,50 @@ def srt_time(seconds):
     return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
 
 
-def translate_to_myanmar(texts, source_language):
-    source_code = LANGUAGE_CODES.get(source_language)
-    if not source_code:
-        raise RuntimeError(
-            f"NLLB-200 language mapping is not configured for detected language "
-            f"'{source_language}'. Add its NLLB language code to LANGUAGE_CODES."
-        )
-    print(f"Loading offline translation model: {MODEL_NAME}")
-    print("The model is downloaded into the Actions runner cache for this job.")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, src_lang=source_code)
-    model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
-    model.eval()
-
-    translated = []
-    batch_size = 8
-    for start in range(0, len(texts), batch_size):
-        batch = texts[start:start + batch_size]
-        encoded = tokenizer(
-            batch, return_tensors="pt", padding=True, truncation=True, max_length=512
-        )
-        with torch.inference_mode():
-            generated = model.generate(
-                **encoded,
-                forced_bos_token_id=tokenizer.convert_tokens_to_ids(TARGET_LANGUAGE),
-                max_new_tokens=256,
-                num_beams=3,
-            )
-        translated.extend(tokenizer.batch_decode(generated, skip_special_tokens=True))
-        print(f"Translated {min(start + len(batch), len(texts))}/{len(texts)} subtitle segments")
-    return translated
+def translate_srt_entries(entries, translator, batch_size=12):
+    """Translate groups of subtitle lines in one request while preserving timing."""
+    translated_all = []
+    for start in range(0, len(entries), batch_size):
+        batch = entries[start:start + batch_size]
+        # Unique separators let us translate multiple subtitle lines in one request.
+        marker = "ZXQSUBTITLEBOUNDARY"
+        joined = f"\n{marker}\n".join(text for _, _, text in batch)
+        translated_text = None
+        last_error = None
+        for attempt in range(4):
+            try:
+                candidate = translator.translate(joined)
+                parts = candidate.split(marker) if candidate else []
+                parts = [part.strip() for part in parts]
+                if len(parts) == len(batch) and all(parts):
+                    translated_text = parts
+                    break
+                last_error = "Translator changed subtitle separators"
+            except Exception as exc:
+                last_error = str(exc)
+            if attempt < 3:
+                delay = 3 * (2 ** attempt)
+                print(f"Translation chunk retry {attempt + 1}; waiting {delay}s: {last_error}")
+                time.sleep(delay)
+        if translated_text is None:
+            # Smaller fallback requests if a combined chunk is rejected or separators change.
+            translated_text = []
+            for _, _, original in batch:
+                value = ""
+                for attempt in range(3):
+                    try:
+                        value = translator.translate(original) or ""
+                        if value.strip():
+                            break
+                    except Exception as exc:
+                        last_error = str(exc)
+                    if attempt < 2:
+                        time.sleep(4 * (attempt + 1))
+                translated_text.append(value.strip())
+        translated_all.extend(translated_text)
+        if start + batch_size < len(entries):
+            time.sleep(1)
+    return translated_all
 
 
 def main(source, output):
@@ -85,7 +72,9 @@ def main(source, output):
     output = Path(output).resolve()
     work = output.parent
     audio = work / "audio.wav"
-    subtitles = work / "myanmar.srt"
+    original_srt = work / "original.srt"
+    translated_srt = work / "myanmar.srt"
+
     run(["ffmpeg", "-y", "-i", str(source), "-vn", "-ac", "1", "-ar", "16000",
          "-c:a", "pcm_s16le", str(audio)])
 
@@ -105,34 +94,49 @@ def main(source, output):
     if not segments:
         raise RuntimeError("Speech transcription returned no text.")
 
-    usable_segments = [segment for segment in segments if segment.text.strip()]
-    originals = [segment.text.strip() for segment in usable_segments]
-    translations = translate_to_myanmar(originals, detected_language)
+    entries = [
+        (srt_time(segment.start), srt_time(segment.end), segment.text.strip())
+        for segment in segments if segment.text.strip()
+    ]
+    if not entries:
+        raise RuntimeError("Speech transcription returned no usable subtitle text.")
 
-    lines = []
-    for segment, original, translated in zip(usable_segments, originals, translations):
-        translated = translated.strip()
+    # Stage 1: write the source-language SRT before translating.
+    original_blocks = [
+        f"{i}\n{start} --> {end}\n{text}\n"
+        for i, (start, end, text) in enumerate(entries, 1)
+    ]
+    original_srt.write_text("\n".join(original_blocks), encoding="utf-8")
+    print(f"Created source SRT with {len(entries)} subtitle entries.")
+
+    # Stage 2: translate groups of SRT text while preserving original timestamps.
+    translator = GoogleTranslator(source="auto", target="my")
+    translations = translate_srt_entries(entries, translator)
+    translated_blocks = []
+    failed = 0
+    for i, ((start, end, original), translated) in enumerate(zip(entries, translations), 1):
         if not translated:
+            failed += 1
             continue
-        # Prevent accidentally publishing source-language subtitles as Burmese.
         if detected_language == "en" and translated == original:
-            raise RuntimeError("Translation returned unchanged English text; refusing to publish.")
-        lines.append(
-            f"{len(lines) + 1}\n{srt_time(segment.start)} --> {srt_time(segment.end)}\n"
-            f"{translated}\n"
-        )
+            failed += 1
+            continue
+        translated_blocks.append(f"{i}\n{start} --> {end}\n{translated}\n")
 
-    if not lines:
-        raise RuntimeError("Myanmar translation returned no subtitle lines.")
+    if not translated_blocks:
+        raise RuntimeError("Myanmar translation failed; no translated subtitle lines were produced.")
+    if failed:
+        print(f"Warning: {failed} subtitle entries could not be translated.")
 
-    subtitles.write_text("\n".join(lines), encoding="utf-8")
-    escaped = str(subtitles).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    translated_srt.write_text("\n".join(translated_blocks), encoding="utf-8")
+    escaped = str(translated_srt).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
     vf = f"subtitles='{escaped}':force_style='FontName=Noto Sans Myanmar,FontSize=22,Outline=2,Shadow=1,Alignment=2,MarginV=28'"
     run(["ffmpeg", "-y", "-i", str(source), "-vf", vf, "-c:v", "libx264",
          "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-b:a", "160k",
          "-movflags", "+faststart", str(output)])
     audio.unlink(missing_ok=True)
-    subtitles.unlink(missing_ok=True)
+    original_srt.unlink(missing_ok=True)
+    translated_srt.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
