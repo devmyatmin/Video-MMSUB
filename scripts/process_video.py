@@ -95,7 +95,7 @@ def add_srt_track_to_video(source, srt_path, output):
                 fields = line[len("Style: "):].split(",")
                 if len(fields) >= 23:
                     fields[1] = "Noto Sans Myanmar"
-                    fields[2] = "29"
+                    fields[2] = "19"
                     fields[3] = "&H0000D7FF"
                     fields[4] = "&H0000D7FF"
                     fields[5] = "&H00000000"
@@ -104,7 +104,7 @@ def add_srt_track_to_video(source, srt_path, output):
                     fields[16] = "2"
                     fields[17] = "1"
                     fields[18] = "2"
-                    fields[21] = "30"
+                    fields[21] = "60"
                     lines[i] = "Style: " + ",".join(fields)
                 break
         else:
