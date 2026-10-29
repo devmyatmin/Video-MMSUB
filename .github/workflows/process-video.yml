@@ -69,6 +69,9 @@ jobs:
         run: |
           python scripts/process_video.py transcribe input-video.mp4 output.srt
           test -s output.srt
+      - name: Delete temporary video after SRT-only transcription
+        if: ${{ inputs.srt_url == '' }}
+        run: rm -f input-video.mp4 audio.wav
       - name: Download supplied SRT
         if: ${{ inputs.srt_url != '' }}
         env:
