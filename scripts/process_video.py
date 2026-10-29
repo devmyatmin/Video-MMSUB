@@ -42,9 +42,9 @@ def transcribe_to_srt(source, output_srt):
     if not entries:
         raise RuntimeError("Speech transcription returned no usable text.")
 
-    blocks = [f"{i}\n{start} --> {end}\n{text}\n"
+    blocks = [f"{i}\\n{start} --> {end}\\n{text}\\n"
               for i, (start, end, text) in enumerate(entries, 1)]
-    output_srt.write_text("\n".join(blocks), encoding="utf-8")
+    output_srt.write_text("\\n".join(blocks), encoding="utf-8")
     audio.unlink(missing_ok=True)
     print(
         f"Created source-language SRT with {len(entries)} entries; "
@@ -54,10 +54,9 @@ def transcribe_to_srt(source, output_srt):
 
 def read_srt_text(path):
     raw = path.read_bytes()
-    # Detect common Unicode text encodings using BOMs first.
-    if raw.startswith(b"\xef\xbb\xbf"):
+    if raw.startswith(b"\\xef\\xbb\\xbf"):
         text, encoding = raw.decode("utf-8-sig"), "UTF-8 with BOM"
-    elif raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+    elif raw.startswith((b"\\xff\\xfe", b"\\xfe\\xff")):
         text, encoding = raw.decode("utf-16"), "UTF-16 with BOM"
     else:
         try:
@@ -71,20 +70,25 @@ def read_srt_text(path):
 
 
 def normalize_myanmar_srt(text):
-    # Detect the Myanmar text encoding, then convert Zawgyi to Unicode before
-    # rendering. Timestamps and subtitle numbering are preserved.
+    # fasttext (used by pyidaungsu) only accepts one line per predict call.
+    # Join subtitle text lines with spaces so the detector receives one line.
     lines = text.splitlines()
-    candidate_indices = [
-        i for i, line in enumerate(lines)
+    candidate_lines = [
+        line for line in lines
         if "-->" not in line and not line.strip().isdigit()
-        and any("\u1000" <= ch <= "\u109f" for ch in line)
+        and any("\\u1000" <= ch <= "\\u109f" for ch in line)
     ]
-    candidate = "\n".join(lines[i] for i in candidate_indices)
+    candidate = " ".join(line.strip() for line in candidate_lines)
     if not candidate.strip():
         print("No Myanmar-script text detected; keeping subtitle text unchanged.")
         return text
 
-    detected = pds.detect(candidate)
+    try:
+        detected = pds.detect(candidate)
+    except Exception as exc:
+        print(f"Myanmar encoding detection failed ({exc}); preserving original text.")
+        return text
+
     print(f"Detected Myanmar subtitle type: {detected}")
     if detected == "mm_zg":
         converted = pds.cvt2uni(text)
@@ -108,13 +112,13 @@ def burn_srt_into_video(source, srt_path, output):
     subtitle_text = read_srt_text(srt_path)
     if "-->" not in subtitle_text:
         raise RuntimeError("The supplied file does not look like an SRT (missing -->).")
-    subtitle_text = subtitle_text.replace("\r\n", "\n").replace("\r", "\n")
+    subtitle_text = subtitle_text.replace("\\r\\n", "\\n").replace("\\r", "\\n")
     subtitle_text = normalize_myanmar_srt(subtitle_text)
     srt_path.write_text(subtitle_text, encoding="utf-8")
 
     escaped = (
-        str(srt_path).replace("\\", "\\\\")
-        .replace(":", "\\:").replace("'", "\\'")
+        str(srt_path).replace("\\\\", "\\\\\\\\")
+        .replace(":", "\\\\:").replace("'", "\\\\'")
     )
     vf = (
         f"subtitles='{escaped}':"
