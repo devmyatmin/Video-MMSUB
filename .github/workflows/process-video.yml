@@ -1,4 +1,4 @@
-name: Convert M3U8 to MP4 or create subtitles
+name: Create subtitles from MP4
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       video_url:
-        description: Direct video or HLS M3U8 URL
+        description: Direct MP4 video URL
         required: true
         type: string
       mode:
@@ -16,10 +16,9 @@ on:
         required: true
         type: choice
         options:
-          - convert
           - transcribe
           - burn
-        default: convert
+        default: transcribe
       srt_url:
         description: SRT URL required only for burn mode
         required: false
@@ -59,8 +58,8 @@ jobs:
           import os
           from urllib.parse import urlparse
           mode = os.environ.get("MODE", "")
-          if mode not in {"convert", "transcribe", "burn"}:
-              raise SystemExit("MODE must be convert, transcribe, or burn")
+          if mode not in {"transcribe", "burn"}:
+              raise SystemExit("MODE must be transcribe or burn")
           for name in ("VIDEO_URL", "SRT_URL"):
               value = os.environ.get(name, "").strip()
               if name == "SRT_URL" and mode != "burn":
@@ -72,47 +71,29 @@ jobs:
               u = urlparse(value)
               if u.scheme not in {"http", "https"} or not u.hostname or u.username or u.password:
                   raise SystemExit(f"{name} must be a valid http/https URL")
+              if name == "VIDEO_URL" and not u.path.lower().endswith(".mp4"):
+                  raise SystemExit("VIDEO_URL must point directly to an .mp4 file")
           PY
-      - name: Download or remux video
+      - name: Download MP4 video
         env:
           VIDEO_URL: ${{ inputs.video_url }}
         run: |
           set -euo pipefail
-          case "$VIDEO_URL" in
-            *".m3u8"*)
-              echo "M3U8 detected: trying FFmpeg stream-copy to MP4 first."
-              if ! ffmpeg -nostdin -y -i "$VIDEO_URL" -c copy -movflags +faststart input-video.mp4; then
-                echo "Direct stream-copy failed; trying yt-dlp as a fallback."
-                rm -f input-video.mp4
-                yt-dlp --extractor-args "generic:impersonate" --no-playlist --force-overwrites -f "bv*+ba/b" --merge-output-format mp4 -o "input-video.%(ext)s" "$VIDEO_URL"
-              fi
-              ;;
-            *)
-              yt-dlp --extractor-args "generic:impersonate" --no-playlist --force-overwrites -f "bv*+ba/b" --merge-output-format mp4 -o "input-video.%(ext)s" "$VIDEO_URL"
-              ;;
-          esac
-          if [ ! -f input-video.mp4 ]; then
-            FILE="$(find . -maxdepth 1 -type f -name 'input-video.*' -print -quit)"
-            if [ -z "$FILE" ]; then echo "No downloaded video found"; exit 1; fi
-            ffmpeg -nostdin -y -i "$FILE" -c copy -movflags +faststart input-video.mp4
-          fi
+          curl --fail --location --retry 3 --retry-delay 2 "$VIDEO_URL" --output input-video.mp4
           test -s input-video.mp4
           SIZE="$(stat -c%s input-video.mp4)"
-          MAX=$((10 * 1024 * 1024 * 1024))
+          MAX=$((10 * 1000 * 1000 * 1000))
           echo "Downloaded video size: $SIZE bytes"
           if [ "$SIZE" -gt "$MAX" ]; then
-            echo "Input video exceeds the 10 GiB limit."
+            echo "Input video exceeds the 10 GB limit."
             exit 1
           fi
-      - name: Copy converted MP4 as output
-        if: ${{ inputs.mode == 'convert' }}
-        run: cp input-video.mp4 output.mp4
       - name: Transcribe to source-language SRT
         if: ${{ inputs.mode == 'transcribe' }}
         run: |
           python scripts/process_video.py transcribe input-video.mp4 output.srt
           test -s output.srt
-      - name: Delete temporary video after SRT-only transcription
+      - name: Delete temporary video after transcription
         if: ${{ inputs.mode == 'transcribe' }}
         run: rm -f input-video.mp4 audio.wav
       - name: Download supplied SRT
@@ -139,8 +120,6 @@ jobs:
             gh release create "mmsub-$JOB_ID" output.srt --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "Source-language speech transcription as SRT. Temporary video is not included."
           elif [ "$MODE" = "burn" ]; then
             gh release create "mmsub-$JOB_ID" output.mp4 --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "MP4 with gold size-30 subtitles burned into video."
-          else
-            gh release create "mmsub-$JOB_ID" output.mp4 --repo "$GH_REPO" --title "M3U8 to MP4 $JOB_ID" --notes "Video stream remuxed/downloaded to MP4 without subtitle processing."
           fi
       - name: Publish failure marker
         if: failure()
