@@ -84,7 +84,7 @@ def add_srt_track_to_video(source, srt_path, output):
         raise RuntimeError("The supplied file does not look like an SRT (missing -->).")
 
     # Convert SRT to ASS so style settings can travel with the selectable subtitle
-    # track. Gold is ASS BGR color &H0000D7FF; use ~2x size and a small upward shift.
+    # track. Gold is ASS BGR color &H0000D7FF; use a smaller font and keep subtitles closer to the bottom.
     ass_path = output.with_suffix(".styled.ass")
     try:
         run(["ffmpeg", "-y", "-i", str(srt_path), "-c:s", "ass", str(ass_path)])
@@ -95,7 +95,7 @@ def add_srt_track_to_video(source, srt_path, output):
                 fields = line[len("Style: "):].split(",")
                 if len(fields) >= 23:
                     fields[1] = "Noto Sans Myanmar"
-                    fields[2] = "44"
+                    fields[2] = "29"
                     fields[3] = "&H0000D7FF"
                     fields[4] = "&H0000D7FF"
                     fields[5] = "&H00000000"
@@ -104,7 +104,7 @@ def add_srt_track_to_video(source, srt_path, output):
                     fields[16] = "2"
                     fields[17] = "1"
                     fields[18] = "2"
-                    fields[21] = "45"
+                    fields[21] = "30"
                     lines[i] = "Style: " + ",".join(fields)
                 break
         else:
@@ -133,5 +133,5 @@ if __name__ == "__main__":
     else:
         raise SystemExit(
             "Usage: process_video.py transcribe INPUT_VIDEO OUTPUT_SRT | "
-            "add-srt INPUT_VIDEO INPUT_SRT OUTPUT_MP4"
+            "add-srt INPUT_VIDEO INPUT_SRT OUTPUT_MKV"
         )
