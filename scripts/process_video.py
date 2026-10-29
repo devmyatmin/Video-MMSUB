@@ -1,5 +1,6 @@
 import sys
 import subprocess
+import unicodedata
 from pathlib import Path
 import pyidaungsu as pds
 from faster_whisper import WhisperModel
@@ -72,6 +73,8 @@ def read_srt_text(path):
 def normalize_myanmar_srt(text):
     # fasttext (used by pyidaungsu) only accepts one line per predict call.
     # Join subtitle text lines with spaces so the detector receives one line.
+    # Normalize equivalent Unicode sequences so Burmese combining marks render consistently.
+    text = unicodedata.normalize("NFC", text)
     lines = text.splitlines()
     candidate_lines = [
         line for line in lines
@@ -91,7 +94,7 @@ def normalize_myanmar_srt(text):
 
     print(f"Detected Myanmar subtitle type: {detected}")
     if detected == "mm_zg":
-        converted = pds.cvt2uni(text)
+        converted = unicodedata.normalize("NFC", pds.cvt2uni(text))
         print("Converted Zawgyi subtitle text to Unicode for correct rendering.")
         return converted
     if detected == "mm_uni":
