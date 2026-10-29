@@ -66,6 +66,13 @@ jobs:
             if [ -z "$FILE" ]; then echo "No downloaded video found"; exit 1; fi
             mv "$FILE" input-video.mp4
           fi
+          SIZE="$(stat -c%s input-video.mp4)"
+          MAX=$((10 * 1024 * 1024 * 1024))
+          echo "Downloaded video size: $SIZE bytes"
+          if [ "$SIZE" -gt "$MAX" ]; then
+            echo "Input video exceeds the 10 GiB limit."
+            exit 1
+          fi
       - name: Transcribe to source-language SRT
         if: ${{ inputs.srt_url == '' }}
         run: |
