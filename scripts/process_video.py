@@ -134,12 +134,12 @@ def burn_srt_into_video(source, srt_path, output):
     if not srt_path.is_file() or not srt_path.stat().st_size:
         raise RuntimeError("The supplied SRT file is missing or empty.")
 
+    # Validate the supplied SRT, but do not normalize, convert, or rewrite it.
+    # This keeps the user's original subtitle text unchanged while testing whether
+    # Myanmar text corruption comes from the preprocessing step or FFmpeg rendering.
     subtitle_text = read_srt_text(srt_path)
     if "-->" not in subtitle_text:
         raise RuntimeError("The supplied file does not look like an SRT (missing -->).")
-    subtitle_text = subtitle_text.replace("\r\n", "\n").replace("\r", "\n")
-    subtitle_text = normalize_myanmar_srt(subtitle_text)
-    srt_path.write_text(subtitle_text, encoding="utf-8")
 
     escaped = (
         str(srt_path).replace("\\", "\\\\")
