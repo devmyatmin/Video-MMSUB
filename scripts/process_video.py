@@ -21,6 +21,23 @@ def srt_time(seconds):
     return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
 
 
+def read_srt_entries(srt_path):
+    """Read subtitle text and timestamps back from an actual SRT file."""
+    entries = []
+    raw = Path(srt_path).read_text(encoding="utf-8-sig").strip()
+    for block in raw.split("\\n\\n"):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if len(lines) < 3 or "-->" not in lines[1]:
+            continue
+        start, end = [part.strip() for part in lines[1].split("-->", 1)]
+        text = " ".join(lines[2:]).strip()
+        if text:
+            entries.append((start, end, text))
+    if not entries:
+        raise RuntimeError(f"No subtitle entries could be read from {srt_path}")
+    return entries
+
+
 def translate_srt_entries(entries, translator, batch_size=12):
     """Translate groups of subtitle lines in one request while preserving timing."""
     translated_all = []
@@ -109,12 +126,15 @@ def main(source, output):
     original_srt.write_text("\n".join(original_blocks), encoding="utf-8")
     print(f"Created source SRT with {len(entries)} subtitle entries.")
 
-    # Stage 2: translate groups of SRT text while preserving original timestamps.
+    # Stage 2: reopen the generated SRT file and translate from that file,
+    # rather than translating the in-memory Whisper segments directly.
+    srt_entries = read_srt_entries(original_srt)
+    print(f"Read {len(srt_entries)} entries back from original.srt for translation.")
     translator = GoogleTranslator(source="auto", target="my")
-    translations = translate_srt_entries(entries, translator)
+    translations = translate_srt_entries(srt_entries, translator)
     translated_blocks = []
     failed = 0
-    for i, ((start, end, original), translated) in enumerate(zip(entries, translations), 1):
+    for i, ((start, end, original), translated) in enumerate(zip(srt_entries, translations), 1):
         if not translated:
             failed += 1
             continue
