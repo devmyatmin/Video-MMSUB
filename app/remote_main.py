@@ -62,11 +62,13 @@ def trigger(inputs):
 
 PAGE = """<!doctype html><html lang="my"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Video MMSUB</title>
 <style>body{font-family:system-ui,sans-serif;background:#101827;color:#eef2ff;margin:0}main{max-width:720px;margin:6vh auto;padding:22px}.panel{background:#1c293d;padding:24px;border-radius:18px}p{line-height:1.7;color:#cbd5e1}input,button{box-sizing:border-box;width:100%;padding:14px;margin:10px 0;border-radius:10px}input{background:#fff;color:#111827;border:0}button,.download{background:#38bdf8;color:#082f49;font-weight:700;border:0;padding:14px;border-radius:10px;display:block;text-align:center;text-decoration:none;margin:10px 0}button:disabled{opacity:.5}#status{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body><main><section class="panel"><h1>🎬 Video MMSUB</h1>
-<p>MP4 သို့မဟုတ် အများသုံး video URL (.m3u8 အပါအဝင်) တစ်ခုတည်းဆို အသံကို နားထောင်ပြီး မူရင်းဘာသာစကားအတိုင်း SRT ဖိုင်ထုတ်မယ်။ Video URL နဲ့ SRT URL နှစ်ခုလုံးထည့်ရင် SRT ကို ဗီဒီယိုထဲ တိုက်ရိုက် Burn လုပ်ပြီး ရွှေရောင်စာတန်းပါတဲ့ MP4 ထုတ်မယ်။</p>
-<form id="form"><label>Video URL (မဖြစ်မနေ)</label><input id="videoUrl" type="url" placeholder="https://.../video.mp4 သို့မဟုတ် .m3u8" required><label>SRT URL (ရွေးချယ်နိုင်သည်)</label><input id="srtUrl" type="url" placeholder="SRT ရှိမှ ထည့်ပါ — https://.../subtitles.srt"><button id="generateBtn">စတင်လုပ်ဆောင်မယ်</button></form><p id="status"></p><p id="download"></p></section></main>
+<p>1DM ကရတဲ့ video URL သို့မဟုတ် .m3u8 ကို ထည့်ပါ။ “MP4 ပြောင်းရန်” ကိုရွေးရင် MP4 ဖိုင်ထုတ်ပြီး တိုက်ရိုက် download link ပေးမယ်။ “အသံမှ SRT ထုတ်ရန်” က မူရင်းဘာသာစကားစာတန်းထုတ်ပြီး “SRT ကို Video ထဲထည့်ရန်” က ပေးထားတဲ့ SRT ကို video ထဲ burn လုပ်ပေးမယ်။</p>
+<form id="form"><label>Video URL (မဖြစ်မနေ)</label><input id="videoUrl" type="url" placeholder="https://.../video.mp4 သို့မဟုတ် .m3u8" required><label for="mode">လုပ်ဆောင်ချက်</label><select id="mode"><option value="convert">MP4 ပြောင်းရန် — direct download link</option><option value="transcribe">အသံမှ မူရင်းဘာသာစကား SRT ထုတ်ရန်</option><option value="burn">ရှိပြီးသား SRT ကို Video ထဲထည့်ရန်</option></select><div id="srtRow" hidden><label>SRT URL (burn mode မှာ မဖြစ်မနေ)</label><input id="srtUrl" type="url" placeholder="https://.../subtitles.srt"></div><button id="generateBtn">စတင်လုပ်ဆောင်မယ်</button></form><p id="status"></p><p id="download"></p></section></main>
 <script>
-const form=document.getElementById('form'),url=document.getElementById('videoUrl'),srt=document.getElementById('srtUrl'),gen=document.getElementById('generateBtn'),status=document.getElementById('status'),dl=document.getElementById('download');let job='';
-form.onsubmit=async e=>{e.preventDefault();gen.disabled=true;status.textContent='Workflow စတင်နေပါတယ်…';dl.replaceChildren();try{let r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video_url:url.value.trim(),srt_url:srt.value.trim()})}),j=await r.json();if(!r.ok)throw Error(j.detail||'Generate failed');job=j.job_id;poll();}catch(x){status.textContent=x.message;gen.disabled=false;}};
+const form=document.getElementById('form'),url=document.getElementById('videoUrl'),srt=document.getElementById('srtUrl'),mode=document.getElementById('mode'),srtRow=document.getElementById('srtRow'),gen=document.getElementById('generateBtn'),status=document.getElementById('status'),dl=document.getElementById('download');let job='';
+function updateMode(){srtRow.hidden=mode.value!=='burn';srt.required=mode.value==='burn';}
+mode.addEventListener('change',updateMode);updateMode();
+form.onsubmit=async e=>{e.preventDefault();if(mode.value==='burn'&&!srt.value.trim()){status.textContent='SRT URL ထည့်ပါ။';return;}gen.disabled=true;status.textContent='Workflow စတင်နေပါတယ်…';dl.replaceChildren();try{let r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video_url:url.value.trim(),srt_url:srt.value.trim(),mode:mode.value})}),j=await r.json();if(!r.ok)throw Error(j.detail||'Generate failed');job=j.job_id;poll();}catch(x){status.textContent=x.message;gen.disabled=false;}};
 async function poll(){try{let r=await fetch('/status/'+job),j=await r.json();status.textContent=j.message+'\\nStatus: '+j.status;if(j.status==='completed'){let a=document.createElement('a');a.href='/download/'+job;a.textContent='⬇ One-click Download '+(j.output_type==='srt'?'SRT':'MP4');a.className='download';a.target='_blank';a.rel='noopener';dl.replaceChildren(a);gen.disabled=false;return;}if(j.status==='failed'){status.textContent+='\\n'+(j.error||'Workflow failed');gen.disabled=false;return;}setTimeout(poll,8000);}catch(e){status.textContent='Status စစ်မရပါ: '+e.message;setTimeout(poll,10000);}}
 </script></body></html>"""
 
@@ -82,20 +84,29 @@ async def generate(request: Request, _: str = Depends(login)):
         payload = await request.json()
         video_url = str(payload.get("video_url", payload.get("drive_url", ""))).strip()
         srt_url = str(payload.get("srt_url", "")).strip()
+        mode = str(payload.get("mode", "")).strip()
+        if not mode:
+            mode = "burn" if srt_url else "transcribe"
     except Exception:
         raise HTTPException(400, "Video URL ထည့်ပါ။")
     validate_url(video_url, "Video URL")
+    if mode not in {"convert", "transcribe", "burn"}:
+        raise HTTPException(400, "လုပ်ဆောင်ချက်ကို ရွေးချယ်ပါ။")
+    if mode == "burn" and not srt_url:
+        raise HTTPException(400, "SRT URL ထည့်ပါ။")
+    if mode != "burn":
+        srt_url = ""
     if srt_url:
         validate_url(srt_url, "SRT URL")
     job_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc).isoformat()
-    output_type = "mp4" if srt_url else "srt"
+    output_type = "mp4" if mode in {"convert", "burn"} else "srt"
     jobs[job_id] = {"job_id": job_id, "status": "queued", "progress": 0,
-        "message": "SRT ထုတ်နေပါတယ်…" if not srt_url else "SRT နဲ့ Video ကို တွဲနေပါတယ်…",
+        "message": {"convert": "M3U8/Video ကို MP4 ပြောင်းနေပါတယ်…", "transcribe": "အသံကို စာသားပြောင်းနေပါတယ်…", "burn": "SRT နဲ့ Video ကို တွဲနေပါတယ်…"}[mode],
         "created_at": now, "updated_at": now, "download_url": None,
         "output_type": output_type, "release_tag": "mmsub-" + job_id}
     try:
-        trigger({"job_id": job_id, "video_url": video_url, "srt_url": srt_url})
+        trigger({"job_id": job_id, "video_url": video_url, "mode": mode, "srt_url": srt_url})
     except Exception:
         patch_job(job_id, status="failed", message="Workflow မစတင်နိုင်ပါ။ GitHub Token/URL ကိုစစ်ပါ။")
         raise
