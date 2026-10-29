@@ -122,8 +122,7 @@ def burn_srt_into_video(source, srt_path, output):
     )
     vf = (
         f"subtitles='{escaped}':"
-        "force_style='FontName=Noto Sans Myanmar,FontSize=22,"
-        "Outline=2,Shadow=1,Alignment=2,MarginV=28'"
+        "force_style='FontName=Noto Sans Myanmar,FontSize=26,PrimaryColour=&H0000D7FF,OutlineColour=&H00000000,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
     )
     run([
         "ffmpeg", "-y", "-i", str(source), "-vf", vf,
