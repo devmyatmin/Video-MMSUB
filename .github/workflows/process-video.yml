@@ -1,4 +1,4 @@
-name: Video to SRT or Add SRT Track to MP4
+name: Video to SRT or Add Styled SRT Track to MKV
 
 on:
   workflow_dispatch:
@@ -83,7 +83,7 @@ jobs:
       - name: Add supplied SRT as a selectable track in MP4
         if: ${{ inputs.srt_url != '' }}
         run: |
-          python scripts/process_video.py add-srt input-video.mp4 input.srt output.mp4
+          python scripts/process_video.py add-srt input-video.mp4 input.srt output.mkv
           test -s output.mp4
       - name: Publish output
         env:
@@ -93,7 +93,7 @@ jobs:
           SRT_URL: ${{ inputs.srt_url }}
         run: |
           if [ -n "$SRT_URL" ]; then
-            gh release create "mmsub-$JOB_ID" output.mp4 --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "MP4 with supplied SRT as a selectable subtitle track. Public asset download."
+            gh release create "mmsub-$JOB_ID" output.mp4 --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "MKV with gold, enlarged, slightly raised selectable ASS subtitles. Public asset download."
           else
             gh release create "mmsub-$JOB_ID" output.srt --repo "$GH_REPO" --title "Video MMSUB $JOB_ID" --notes "Source-language speech transcription as SRT. Temporary video is not included."
           fi
