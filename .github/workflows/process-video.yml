@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       video_url:
-        description: One-time URL from the password-protected app
+        description: Google Drive share URL for the source video
         required: true
         type: string
       callback_url:
@@ -42,8 +42,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra curl
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
-      - name: Validate and download source video
+        run: pip install -r requirements.txt gdown
+      - name: Validate and download source video from Google Drive
         env:
           VIDEO_URL: ${{ inputs.video_url }}
         run: |
@@ -51,10 +51,10 @@ jobs:
           import os
           from urllib.parse import urlparse
           u = urlparse(os.environ["VIDEO_URL"])
-          if u.scheme != "https" or not u.hostname:
-              raise SystemExit("Video URL must use HTTPS")
+          if u.scheme != "https" or u.hostname not in {"drive.google.com", "www.drive.google.com", "docs.google.com"}:
+              raise SystemExit("Only Google Drive share URLs are accepted")
           PY
-          curl --fail --location --retry 3 --retry-delay 2 --max-time 3600 "$VIDEO_URL" -o input-video
+          gdown --fuzzy "$VIDEO_URL" -O input-video
       - name: Transcribe, translate and burn subtitles
         run: python scripts/process_video.py input-video output.mp4
       - name: Send output back to the phone server
