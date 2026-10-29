@@ -11,17 +11,9 @@ on:
         description: Direct video URL or supported website video URL
         required: true
         type: string
-      callback_url:
-        description: App callback endpoint base URL
-        required: true
-        type: string
-      callback_token:
-        description: Per-job callback secret
-        required: true
-        type: string
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: video-mmsub-${{ inputs.job_id }}
@@ -40,7 +32,7 @@ jobs:
       - name: Install system tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra curl
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
       - name: Install Python dependencies
         run: pip install -r requirements.txt yt-dlp
       - name: Validate and download video URL
@@ -69,24 +61,24 @@ jobs:
           fi
       - name: Transcribe, translate and burn subtitles
         run: python scripts/process_video.py input-video.mp4 output.mp4
-      - name: Send output back to the phone server
+      - name: Publish MP4 as a direct GitHub download
         env:
-          CALLBACK_URL: ${{ inputs.callback_url }}
-          CALLBACK_TOKEN: ${{ inputs.callback_token }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           JOB_ID: ${{ inputs.job_id }}
         run: |
-          curl --fail --show-error --retry 2 --max-time 3600 \
-            -H "Authorization: Bearer $CALLBACK_TOKEN" \
-            -F "file=@output.mp4;type=video/mp4" \
-            "$CALLBACK_URL/complete"
-      - name: Notify app if processing failed
+          gh release create "mmsub-$JOB_ID" output.mp4 \
+            --repo "$GH_REPO" \
+            --title "Video MMSUB $JOB_ID" \
+            --notes "Video-MMSUB output. Direct MP4 download is available in release assets."
+      - name: Publish failure marker for website status
         if: failure()
         env:
-          CALLBACK_URL: ${{ inputs.callback_url }}
-          CALLBACK_TOKEN: ${{ inputs.callback_token }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          JOB_ID: ${{ inputs.job_id }}
         run: |
-          curl --silent --show-error --max-time 30 \
-            -H "Authorization: Bearer $CALLBACK_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"error":"GitHub Actions processing failed. Check the Actions run logs."}' \
-            "$CALLBACK_URL/failed" || true
+          gh release create "mmsub-$JOB_ID" \
+            --repo "$GH_REPO" \
+            --title "Video MMSUB $JOB_ID - failed" \
+            --notes "PROCESSING_FAILED: Check the GitHub Actions run logs for the error." || true
