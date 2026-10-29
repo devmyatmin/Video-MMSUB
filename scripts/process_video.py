@@ -118,15 +118,15 @@ def main(source, output):
         if detected_language == "en" and translated == original:
             raise RuntimeError("Translation returned unchanged English text; refusing to publish.")
         lines.append(
-            f"{len(lines) + 1}\\n{srt_time(segment.start)} --> {srt_time(segment.end)}\\n"
-            f"{translated}\\n"
+            f"{len(lines) + 1}\n{srt_time(segment.start)} --> {srt_time(segment.end)}\n"
+            f"{translated}\n"
         )
 
     if not lines:
         raise RuntimeError("Myanmar translation returned no subtitle lines.")
 
-    subtitles.write_text("\\n".join(lines), encoding="utf-8")
-    escaped = str(subtitles).replace("\\\\", "\\\\\\\\").replace(":", "\\\\:").replace("'", "\\\\'")
+    subtitles.write_text("\n".join(lines), encoding="utf-8")
+    escaped = str(subtitles).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
     vf = f"subtitles='{escaped}':force_style='FontName=Noto Sans Myanmar,FontSize=22,Outline=2,Shadow=1,Alignment=2,MarginV=28'"
     run(["ffmpeg", "-y", "-i", str(source), "-vf", vf, "-c:v", "libx264",
          "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-b:a", "160k",
