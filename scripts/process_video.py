@@ -1,5 +1,6 @@
 import sys
 import subprocess
+import time
 from pathlib import Path
 
 from deep_translator import GoogleTranslator
@@ -18,6 +19,50 @@ def srt_time(seconds):
     minutes, rem = divmod(rem, 60_000)
     secs, millis = divmod(rem, 1000)
     return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
+
+
+def translate_in_batches(translator, texts, batch_size=8):
+    """Translate small batches with retries and backoff to reduce rate-limit errors."""
+    translated = []
+    for start in range(0, len(texts), batch_size):
+        batch = texts[start:start + batch_size]
+        result = None
+        last_error = None
+        for attempt in range(4):
+            try:
+                result = translator.translate_batch(batch)
+                if result and len(result) == len(batch) and all(
+                    isinstance(item, str) and item.strip() for item in result
+                ):
+                    break
+                last_error = "Translator returned missing/empty batch items"
+                result = None
+            except Exception as exc:
+                last_error = str(exc)
+                result = None
+            if attempt < 3:
+                delay = min(30, 3 * (2 ** attempt))
+                print(f"Translation batch retry {attempt + 1}; waiting {delay}s: {last_error}")
+                time.sleep(delay)
+        if result is None:
+            # Fall back to translating items individually, slowly, after batch retries.
+            result = []
+            for item in batch:
+                value = None
+                for attempt in range(3):
+                    try:
+                        value = translator.translate(item)
+                        if value and value.strip():
+                            break
+                    except Exception as exc:
+                        last_error = str(exc)
+                    if attempt < 2:
+                        time.sleep(5 * (attempt + 1))
+                result.append(value.strip() if value and value.strip() else "")
+        translated.extend(result)
+        if start + batch_size < len(texts):
+            time.sleep(1.5)
+    return translated
 
 
 def main(source, output):
@@ -45,26 +90,16 @@ def main(source, output):
     if not segments:
         raise RuntimeError("Speech transcription returned no text.")
 
+    usable_segments = [segment for segment in segments if segment.text.strip()]
+    originals = [segment.text.strip() for segment in usable_segments]
     translator = GoogleTranslator(source="auto", target="my")
+    translations = translate_in_batches(translator, originals)
+
     lines = []
     translation_errors = []
-    for segment in segments:
-        original = segment.text.strip()
-        if not original:
-            continue
-        translated = None
-        last_error = None
-        # Retry translation instead of silently keeping the original-language text.
-        for attempt in range(3):
-            try:
-                translated = translator.translate(original)
-                if translated and translated.strip():
-                    break
-                last_error = "Translator returned an empty result"
-            except Exception as exc:
-                last_error = str(exc)
-        if not translated or not translated.strip():
-            translation_errors.append(f"{original[:100]}: {last_error}")
+    for segment, original, translated in zip(usable_segments, originals, translations):
+        if not translated:
+            translation_errors.append(f"Translation failed: {original[:100]}")
             continue
         translated = translated.strip()
         # Do not accept an unchanged Latin-script line as a successful Burmese translation.
@@ -82,6 +117,9 @@ def main(source, output):
             "Myanmar translation failed; refusing to publish an unsubtitled/original-language video. "
             + detail
         )
+
+    if translation_errors:
+        print(f"Warning: {len(translation_errors)} subtitle segments could not be translated.")
 
     subtitles.write_text("\n".join(lines), encoding="utf-8")
     escaped = str(subtitles).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
