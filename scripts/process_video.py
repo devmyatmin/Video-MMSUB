@@ -72,7 +72,7 @@ def read_srt_text(path):
 
 
 def add_srt_track_to_video(source, srt_path, output):
-    """Mux the SRT as a selectable subtitle track; never render glyphs into video frames."""
+    """Add styled ASS subtitles as a selectable track in MKV; do not burn them."""
     source, srt_path, output = (
         Path(source).resolve(), Path(srt_path).resolve(), Path(output).resolve()
     )
@@ -83,16 +83,46 @@ def add_srt_track_to_video(source, srt_path, output):
     if "-->" not in subtitle_text:
         raise RuntimeError("The supplied file does not look like an SRT (missing -->).")
 
-    # Store subtitles as text in a selectable MP4 track. Copy video/audio streams
-    # without re-encoding, leaving Myanmar glyph shaping to the video player.
-    run([
-        "ffmpeg", "-y", "-i", str(source), "-i", str(srt_path),
-        "-map", "0:v:0", "-map", "0:a?", "-map", "1:0",
-        "-c", "copy", "-c:s", "mov_text",
-        "-metadata:s:s:0", "language=und",
-        "-metadata:s:s:0", "title=Subtitles",
-        "-movflags", "+faststart", str(output),
-    ])
+    # Convert SRT to ASS so style settings can travel with the selectable subtitle
+    # track. Gold is ASS BGR color &H0000D7FF; use ~2x size and a small upward shift.
+    ass_path = output.with_suffix(".styled.ass")
+    try:
+        run(["ffmpeg", "-y", "-i", str(srt_path), "-c:s", "ass", str(ass_path)])
+        ass_text = ass_path.read_text(encoding="utf-8-sig")
+        lines = ass_text.splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith("Style: Default,"):
+                fields = line[len("Style: "):].split(",")
+                if len(fields) >= 23:
+                    fields[1] = "Noto Sans Myanmar"
+                    fields[2] = "44"
+                    fields[3] = "&H0000D7FF"
+                    fields[4] = "&H0000D7FF"
+                    fields[5] = "&H00000000"
+                    fields[6] = "&H80000000"
+                    fields[7] = "0"
+                    fields[16] = "2"
+                    fields[17] = "1"
+                    fields[18] = "2"
+                    fields[21] = "45"
+                    lines[i] = "Style: " + ",".join(fields)
+                break
+        else:
+            raise RuntimeError("Could not find the default style in converted ASS subtitles.")
+        ass_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        # MKV supports a selectable ASS track with embedded style metadata.
+        # Video/audio are stream-copied; subtitle text is not rendered into frames.
+        run([
+            "ffmpeg", "-y", "-i", str(source), "-i", str(ass_path),
+            "-map", "0:v:0", "-map", "0:a?", "-map", "1:0",
+            "-c", "copy", "-c:s", "ass",
+            "-metadata:s:s:0", "language=und",
+            "-metadata:s:s:0", "title=Gold Myanmar subtitles",
+            str(output),
+        ])
+    finally:
+        ass_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
