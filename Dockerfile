@@ -20,4 +20,4 @@ RUN mkdir -p /data/jobs && useradd --create-home --uid 10001 appuser \
 USER appuser
 
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "120"]
+CMD ["uvicorn", "app.remote_main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "120"]
