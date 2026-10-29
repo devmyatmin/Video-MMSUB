@@ -62,12 +62,12 @@ def trigger(inputs):
 
 PAGE = """<!doctype html><html lang="my"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Video MMSUB</title>
 <style>body{font-family:system-ui,sans-serif;background:#101827;color:#eef2ff;margin:0}main{max-width:720px;margin:6vh auto;padding:22px}.panel{background:#1c293d;padding:24px;border-radius:18px}p{line-height:1.7;color:#cbd5e1}input,button{box-sizing:border-box;width:100%;padding:14px;margin:10px 0;border-radius:10px}input{background:#fff;color:#111827;border:0}button,.download{background:#38bdf8;color:#082f49;font-weight:700;border:0;padding:14px;border-radius:10px;display:block;text-align:center;text-decoration:none;margin:10px 0}button:disabled{opacity:.5}#status{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body><main><section class="panel"><h1>🎬 Video MMSUB</h1>
-<p>Video URL တစ်ခုတည်းဆို အသံကို နားထောင်ပြီး မူရင်းဘာသာစကားအတိုင်း SRT ထုတ်မယ်။ Video URL နဲ့ SRT URL နှစ်ခုလုံးထည့်ရင် အသံကို မစစ်ဘဲ SRT ကို MKV ထဲမှာ ရွှေရောင်စာလုံးကြီးနဲ့ ရွေးဖွင့်နိုင်တဲ့ subtitle track အဖြစ် ထည့်မယ်။</p>
-<form id="form"><label>Video URL (မဖြစ်မနေ)</label><input id="videoUrl" type="url" placeholder="https://.../video.mp4" required><label>SRT URL (ရွေးချယ်နိုင်သည်)</label><input id="srtUrl" type="url" placeholder="SRT ရှိမှ ထည့်ပါ — https://.../subtitles.srt"><button id="generateBtn">စတင်လုပ်ဆောင်မယ်</button></form><p id="status"></p><p id="download"></p></section></main>
+<p>MP4 သို့မဟုတ် အများသုံး video URL (.m3u8 အပါအဝင်) တစ်ခုတည်းဆို အသံကို နားထောင်ပြီး မူရင်းဘာသာစကားအတိုင်း SRT ဖိုင်ထုတ်မယ်။ Video URL နဲ့ SRT URL နှစ်ခုလုံးထည့်ရင် SRT ကို ဗီဒီယိုထဲ တိုက်ရိုက် Burn လုပ်ပြီး ရွှေရောင်စာတန်းပါတဲ့ MP4 ထုတ်မယ်။</p>
+<form id="form"><label>Video URL (မဖြစ်မနေ)</label><input id="videoUrl" type="url" placeholder="https://.../video.mp4 သို့မဟုတ် .m3u8" required><label>SRT URL (ရွေးချယ်နိုင်သည်)</label><input id="srtUrl" type="url" placeholder="SRT ရှိမှ ထည့်ပါ — https://.../subtitles.srt"><button id="generateBtn">စတင်လုပ်ဆောင်မယ်</button></form><p id="status"></p><p id="download"></p></section></main>
 <script>
 const form=document.getElementById('form'),url=document.getElementById('videoUrl'),srt=document.getElementById('srtUrl'),gen=document.getElementById('generateBtn'),status=document.getElementById('status'),dl=document.getElementById('download');let job='';
 form.onsubmit=async e=>{e.preventDefault();gen.disabled=true;status.textContent='Workflow စတင်နေပါတယ်…';dl.replaceChildren();try{let r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video_url:url.value.trim(),srt_url:srt.value.trim()})}),j=await r.json();if(!r.ok)throw Error(j.detail||'Generate failed');job=j.job_id;poll();}catch(x){status.textContent=x.message;gen.disabled=false;}};
-async function poll(){try{let r=await fetch('/status/'+job),j=await r.json();status.textContent=j.message+'\\nStatus: '+j.status;if(j.status==='completed'){let a=document.createElement('a');a.href='/download/'+job;a.textContent='⬇ One-click Download '+(j.output_type==='srt'?'SRT':'MKV');a.className='download';a.target='_blank';a.rel='noopener';dl.replaceChildren(a);gen.disabled=false;return;}if(j.status==='failed'){status.textContent+='\\n'+(j.error||'Workflow failed');gen.disabled=false;return;}setTimeout(poll,8000);}catch(e){status.textContent='Status စစ်မရပါ: '+e.message;setTimeout(poll,10000);}}
+async function poll(){try{let r=await fetch('/status/'+job),j=await r.json();status.textContent=j.message+'\\nStatus: '+j.status;if(j.status==='completed'){let a=document.createElement('a');a.href='/download/'+job;a.textContent='⬇ One-click Download '+(j.output_type==='srt'?'SRT':'MP4');a.className='download';a.target='_blank';a.rel='noopener';dl.replaceChildren(a);gen.disabled=false;return;}if(j.status==='failed'){status.textContent+='\\n'+(j.error||'Workflow failed');gen.disabled=false;return;}setTimeout(poll,8000);}catch(e){status.textContent='Status စစ်မရပါ: '+e.message;setTimeout(poll,10000);}}
 </script></body></html>"""
 
 app = FastAPI(title="Video MMSUB", docs_url=None, redoc_url=None)
@@ -89,7 +89,7 @@ async def generate(request: Request, _: str = Depends(login)):
         validate_url(srt_url, "SRT URL")
     job_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc).isoformat()
-    output_type = "mkv" if srt_url else "srt"
+    output_type = "mp4" if srt_url else "srt"
     jobs[job_id] = {"job_id": job_id, "status": "queued", "progress": 0,
         "message": "SRT ထုတ်နေပါတယ်…" if not srt_url else "SRT နဲ့ Video ကို တွဲနေပါတယ်…",
         "created_at": now, "updated_at": now, "download_url": None,
@@ -112,7 +112,7 @@ def status(job_id: str, _: str = Depends(login)):
         code, raw = github_request(f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/tags/{tag}")
         if code == 200:
             release = json.loads(raw.decode("utf-8"))
-            wanted = "output.mkv" if job.get("output_type") == "mkv" else "output.srt"
+            wanted = "output.mp4" if job.get("output_type") == "mp4" else "output.srt"
             asset = next((a for a in release.get("assets", []) if a.get("name") == wanted), None)
             if asset:
                 patch_job(job_id, status="completed", progress=100,
