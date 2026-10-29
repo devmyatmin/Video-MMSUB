@@ -1,10 +1,37 @@
 import sys
 import subprocess
-import time
 from pathlib import Path
 
-from deep_translator import GoogleTranslator
+import torch
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from faster_whisper import WhisperModel
+
+MODEL_NAME = "facebook/nllb-200-distilled-600M"
+TARGET_LANGUAGE = "mya_Mymr"
+
+# Map Whisper language IDs to NLLB-200 language codes.
+LANGUAGE_CODES = {
+    "af": "afr_Latn", "am": "amh_Ethi", "ar": "arb_Arab", "az": "azj_Latn",
+    "be": "bel_Cyrl", "bg": "bul_Cyrl", "bn": "ben_Beng", "bs": "bos_Latn",
+    "ca": "cat_Latn", "ceb": "ceb_Latn", "cs": "ces_Latn", "cy": "cym_Latn",
+    "da": "dan_Latn", "de": "deu_Latn", "el": "ell_Grek", "en": "eng_Latn",
+    "es": "spa_Latn", "et": "est_Latn", "fa": "pes_Arab", "fi": "fin_Latn",
+    "fr": "fra_Latn", "ga": "gle_Latn", "gl": "glg_Latn", "gu": "guj_Gujr",
+    "ha": "hau_Latn", "he": "heb_Hebr", "hi": "hin_Deva", "hr": "hrv_Latn",
+    "ht": "hat_Latn", "hu": "hun_Latn", "hy": "hye_Armn", "id": "ind_Latn",
+    "is": "isl_Latn", "it": "ita_Latn", "ja": "jpn_Jpan", "jv": "jav_Latn",
+    "ka": "kat_Geor", "kk": "kaz_Cyrl", "km": "khm_Khmr", "kn": "kan_Knda",
+    "ko": "kor_Hang", "lo": "lao_Laoo", "lt": "lit_Latn", "lv": "lvs_Latn",
+    "mk": "mkd_Cyrl", "ml": "mal_Mlym", "mn": "khk_Cyrl", "mr": "mar_Deva",
+    "ms": "zsm_Latn", "my": "mya_Mymr", "ne": "npi_Deva", "nl": "nld_Latn",
+    "no": "nob_Latn", "pa": "pan_Guru", "pl": "pol_Latn", "ps": "pbt_Arab",
+    "pt": "por_Latn", "ro": "ron_Latn", "ru": "rus_Cyrl", "si": "sin_Sinh",
+    "sk": "slk_Latn", "sl": "slv_Latn", "sq": "als_Latn", "sr": "srp_Cyrl",
+    "sv": "swe_Latn", "sw": "swh_Latn", "ta": "tam_Taml", "te": "tel_Telu",
+    "th": "tha_Thai", "tl": "tgl_Latn", "tr": "tur_Latn", "uk": "ukr_Cyrl",
+    "ur": "urd_Arab", "uz": "uzn_Latn", "vi": "vie_Latn", "yo": "yor_Latn",
+    "zh": "zho_Hans", "yue": "yue_Hant",
+}
 
 
 def run(args):
@@ -21,47 +48,35 @@ def srt_time(seconds):
     return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
 
 
-def translate_in_batches(translator, texts, batch_size=8):
-    """Translate small batches with retries and backoff to reduce rate-limit errors."""
+def translate_to_myanmar(texts, source_language):
+    source_code = LANGUAGE_CODES.get(source_language)
+    if not source_code:
+        raise RuntimeError(
+            f"NLLB-200 language mapping is not configured for detected language "
+            f"'{source_language}'. Add its NLLB language code to LANGUAGE_CODES."
+        )
+    print(f"Loading offline translation model: {MODEL_NAME}")
+    print("The model is downloaded into the Actions runner cache for this job.")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, src_lang=source_code)
+    model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
+    model.eval()
+
     translated = []
+    batch_size = 8
     for start in range(0, len(texts), batch_size):
         batch = texts[start:start + batch_size]
-        result = None
-        last_error = None
-        for attempt in range(4):
-            try:
-                result = translator.translate_batch(batch)
-                if result and len(result) == len(batch) and all(
-                    isinstance(item, str) and item.strip() for item in result
-                ):
-                    break
-                last_error = "Translator returned missing/empty batch items"
-                result = None
-            except Exception as exc:
-                last_error = str(exc)
-                result = None
-            if attempt < 3:
-                delay = min(30, 3 * (2 ** attempt))
-                print(f"Translation batch retry {attempt + 1}; waiting {delay}s: {last_error}")
-                time.sleep(delay)
-        if result is None:
-            # Fall back to translating items individually, slowly, after batch retries.
-            result = []
-            for item in batch:
-                value = None
-                for attempt in range(3):
-                    try:
-                        value = translator.translate(item)
-                        if value and value.strip():
-                            break
-                    except Exception as exc:
-                        last_error = str(exc)
-                    if attempt < 2:
-                        time.sleep(5 * (attempt + 1))
-                result.append(value.strip() if value and value.strip() else "")
-        translated.extend(result)
-        if start + batch_size < len(texts):
-            time.sleep(1.5)
+        encoded = tokenizer(
+            batch, return_tensors="pt", padding=True, truncation=True, max_length=512
+        )
+        with torch.inference_mode():
+            generated = model.generate(
+                **encoded,
+                forced_bos_token_id=tokenizer.convert_tokens_to_ids(TARGET_LANGUAGE),
+                max_new_tokens=256,
+                num_beams=3,
+            )
+        translated.extend(tokenizer.batch_decode(generated, skip_special_tokens=True))
+        print(f"Translated {min(start + len(batch), len(texts))}/{len(texts)} subtitle segments")
     return translated
 
 
@@ -92,37 +107,26 @@ def main(source, output):
 
     usable_segments = [segment for segment in segments if segment.text.strip()]
     originals = [segment.text.strip() for segment in usable_segments]
-    translator = GoogleTranslator(source="auto", target="my")
-    translations = translate_in_batches(translator, originals)
+    translations = translate_to_myanmar(originals, detected_language)
 
     lines = []
-    translation_errors = []
     for segment, original, translated in zip(usable_segments, originals, translations):
-        if not translated:
-            translation_errors.append(f"Translation failed: {original[:100]}")
-            continue
         translated = translated.strip()
-        # Do not accept an unchanged Latin-script line as a successful Burmese translation.
-        if detected_language in {"en", "ja"} and translated == original:
-            translation_errors.append(f"Translation unchanged: {original[:100]}")
+        if not translated:
             continue
+        # Prevent accidentally publishing source-language subtitles as Burmese.
+        if detected_language == "en" and translated == original:
+            raise RuntimeError("Translation returned unchanged English text; refusing to publish.")
         lines.append(
-            f"{len(lines) + 1}\n{srt_time(segment.start)} --> {srt_time(segment.end)}\n"
-            f"{translated}\n"
+            f"{len(lines) + 1}\\n{srt_time(segment.start)} --> {srt_time(segment.end)}\\n"
+            f"{translated}\\n"
         )
 
     if not lines:
-        detail = "; ".join(translation_errors[:3])
-        raise RuntimeError(
-            "Myanmar translation failed; refusing to publish an unsubtitled/original-language video. "
-            + detail
-        )
+        raise RuntimeError("Myanmar translation returned no subtitle lines.")
 
-    if translation_errors:
-        print(f"Warning: {len(translation_errors)} subtitle segments could not be translated.")
-
-    subtitles.write_text("\n".join(lines), encoding="utf-8")
-    escaped = str(subtitles).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    subtitles.write_text("\\n".join(lines), encoding="utf-8")
+    escaped = str(subtitles).replace("\\\\", "\\\\\\\\").replace(":", "\\\\:").replace("'", "\\\\'")
     vf = f"subtitles='{escaped}':force_style='FontName=Noto Sans Myanmar,FontSize=22,Outline=2,Shadow=1,Alignment=2,MarginV=28'"
     run(["ffmpeg", "-y", "-i", str(source), "-vf", vf, "-c:v", "libx264",
          "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-b:a", "160k",
