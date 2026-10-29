@@ -1,20 +1,20 @@
 # Video MMSUB
 
-Password-protected web app hosted on your phone/Termux. Upload a video, press Generate, and GitHub Actions downloads the video through a one-time URL, transcribes speech in the detected source language into SRT, or adds a supplied SRT as a gold, enlarged, slightly raised selectable ASS subtitle track in MKV, then uploads the result back to the phone server.
+Password-protected web app hosted on your phone/Termux. Paste a direct video URL or HLS `.m3u8` URL (including links copied from 1DM), choose **Convert to MP4**, and receive a downloadable MP4 release-asset link. You can also transcribe speech into source-language SRT or burn a supplied SRT into an MP4.
 
 ## How it works
 
 1. Termux runs the web app; expose it through a public HTTPS tunnel while you use it.
-2. The workflow accepts downloaded input videos up to 10 GiB (10,737,418,240 bytes), subject to runner disk space and source URL support.
+2. The workflow accepts public direct video URLs and HLS `.m3u8` URLs, up to 10 GiB, subject to runner disk space, stream access, and source URL support. For `.m3u8`, FFmpeg first tries `ffmpeg -i URL -c copy -movflags +faststart input-video.mp4`; `yt-dlp` is the fallback if that fails.
 3. Press Generate. The server dispatches `.github/workflows/process-video.yml` using a GitHub token stored only in the server environment.
-4. GitHub Actions downloads the one-time video URL, processes the video, and POSTs the output back to the phone's public callback URL.
-5. The web page shows a download link when processing completes.
+4. GitHub Actions fetches/remuxes the video, then publishes the selected MP4 or SRT as a GitHub Release asset.
+5. The web page polls for completion and displays a direct download link to the asset.
 
 The workflow is separate from `.github/workflows/ci.yml`; CI only validates the repository.
 
 ## GitHub token setup
 
-Create a fine-grained personal access token for this repository with **Actions: Read and write** permission. The token is used by the server to dispatch the workflow. Do not paste it into browser JavaScript, commit it to Git, or share it with friends. If it is exposed, revoke it and create a new one.
+Create a fine-grained personal access token for this repository with **Actions: Read and write** and **Contents: Read-only** permissions. Actions permission lets the server dispatch the workflow; Contents read lets the app check whether the output release asset is ready. Do not paste it into browser JavaScript, commit it to Git, or share it with friends. If it is exposed, revoke it and create a new one.
 
 ## Android Termux setup
 
@@ -57,7 +57,8 @@ If you use a 30-minute auto-stop timer, the phone server must remain online unti
 
 ## Limits and security
 
-- The workflow rejects input videos larger than 10 GiB. This is a configured cap, not a guarantee that every 10 GiB video can be processed: GitHub-hosted runner disk space, network speed, processing time, Actions usage limits, and source URL support can impose lower practical limits. GitHub Releases also has per-file asset limits, so very large burned MP4 outputs may not publish successfully.
+- The workflow rejects input videos larger than 10 GiB. This is a configured cap, not a guarantee that every 10 GiB video can be processed: GitHub-hosted runner disk space, network speed, processing time, Actions usage limits, and source URL support can impose lower practical limits. GitHub Releases has per-file asset limits, so very large MP4 outputs may not publish successfully.
+- Some `.m3u8` links expire quickly or require headers/cookies, and some streams use codecs that cannot be copied directly into MP4. Such links may fail; the workflow tries `yt-dlp` as a fallback. Only process videos you have permission to download.
 - The phone needs enough free storage for the original and output video. Output files remain on the phone until manually deleted.
 - Job status is kept in memory. Restarting the app loses the page's job status even though files may remain on disk.
 - The one-time source URL and per-job callback token are secrets. The website password protects the user interface; the GitHub token must stay on the server.
