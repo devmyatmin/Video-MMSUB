@@ -22,6 +22,7 @@ APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024  # 5 GiB
 
 app = FastAPI(title="Video MMSUB", docs_url=None, redoc_url=None)
 security = HTTPBasic()
@@ -137,14 +138,14 @@ button{background:#38bdf8;color:#082f49;font-weight:700;cursor:pointer;border:0}
 <p>Video တင်ပါ။ အသံကို စာသားပြောင်းပြီး မြန်မာဘာသာပြန်စာတန်းထိုးထားတဲ့ MP4 ကို ဒီ Web မှာပဲ ပြန်ယူနိုင်ပါတယ်။</p>
 <form id="upload"><label for="video">Video ဖိုင်</label><input id="video" name="video" type="file" accept="video/*,.mkv,.avi,.mov,.webm" required><button id="submit" type="submit">တင်ပြီး စာတန်းထိုးမယ်</button></form>
 <div id="status" role="status"></div><div id="download"></div>
-<p class="hint">App ထဲမှာ အရှည်/ဖိုင်အရွယ်အစား hard limit မထားပါ။ Server storage၊ RAM၊ CPU နဲ့ hosting provider ကန့်သတ်ချက်တွေတော့ သက်ရောက်နိုင်ပါတယ်။</p>
+<p class="hint">Video ဖိုင်အရွယ်အစား အများဆုံး 5 GB (5 GiB) အထိ လက်ခံပါတယ်။ Server/hosting ကန့်သတ်ချက်များ သက်ရောက်နိုင်ပါတယ်။</p>
 </section></main><script>
 const form=document.querySelector('#upload'),statusEl=document.querySelector('#status'),button=document.querySelector('#submit'),download=document.querySelector('#download');
 form.addEventListener('submit',async e=>{e.preventDefault();download.innerHTML='';statusEl.textContent='Video တင်နေပါတယ်…';button.disabled=true;
 try{const data=new FormData();data.append('video',document.querySelector('#video').files[0]);const res=await fetch('/upload',{method:'POST',body:data});const body=await res.json();if(!res.ok)throw new Error(body.detail||'Upload မအောင်မြင်ပါ');statusEl.textContent='အလုပ်စတင်ပါပြီ။ Job ID: '+body.job_id;
 const poll=async()=>{const r=await fetch('/status/'+body.job_id);const j=await r.json();statusEl.textContent=j.message+'\\nProgress: '+j.progress+'%';if(j.status==='completed'){download.innerHTML='<a style="color:#7dd3fc" href="'+j.download_url+'">မြန်မာစာတန်းထိုး Video ကို ဒေါင်းလုဒ်ယူရန်</a>';button.disabled=false;return}if(j.status==='failed'){statusEl.textContent+='\\nError: '+(j.error||'unknown');button.disabled=false;return}setTimeout(poll,4000)};poll();
 }catch(err){statusEl.textContent=err.message;button.disabled=false}});
-</script></section></main></body></html>"""
+</script></body></html>"""
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -165,8 +166,19 @@ async def upload_video(background_tasks: BackgroundTasks, video: UploadFile = Fi
     output_dir.mkdir(parents=True, exist_ok=False)
     input_path = output_dir / f"input{suffix}"
     try:
+        total_bytes = 0
         with input_path.open("wb") as destination:
-            shutil.copyfileobj(video.file, destination, length=1024 * 1024)
+            while True:
+                chunk = await video.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Video ဖိုင်အရွယ်အစား 5 GB ထက်မကျော်ရပါ။")
+                destination.write(chunk)
+    except HTTPException:
+        shutil.rmtree(output_dir, ignore_errors=True)
+        raise
     except Exception:
         shutil.rmtree(output_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail="Upload သိမ်းဆည်းမရပါ။ Server disk ကိုစစ်ပါ။")
