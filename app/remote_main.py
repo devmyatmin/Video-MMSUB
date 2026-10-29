@@ -79,13 +79,13 @@ p{line-height:1.7;color:#cbd5e1}input,button{box-sizing:border-box;width:100%;pa
 input{background:#fff;color:#111827;border:0}button{background:#38bdf8;color:#082f49;font-weight:700;border:0}button:disabled{opacity:.5}
 a{color:#7dd3fc}#status{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body>
 <main><section class="panel"><h1>🎬 Video MMSUB</h1>
-<p>Google Drive ထဲက Video URL ကို ထည့်ပြီး Generate နှိပ်ပါ။ Drive sharing ကို “Anyone with the link” ထားပါ။ GitHub က Video ကိုယူပြီး မြန်မာစာတန်းထိုးကာ ဒီ Website ကို ပြန်ပို့ပေးမယ်။</p>
-<form id="form"><input id="driveUrl" type="url" placeholder="Google Drive video URL ထည့်ပါ" required>
+<p>Video URL သို့မဟုတ် ပံ့ပိုးထားသော Website ရဲ့ video link ကို ထည့်ပါ။ GitHub က Video ကိုယူပြီး မြန်မာစာတန်းထိုးကာ ဒီ Saver ကို ပြန်ပို့ပေးမယ်။</p>
+<form id="form"><input id="videoUrl" type="url" placeholder="Video URL / One-click link ထည့်ပါ" required>
 <button id="generateBtn">မြန်မာစာတန်းထိုး Generate</button></form><p id="status"></p><p id="download"></p>
 <p>မှတ်ချက် — Output ပြန်ပို့ရန် Website Tunnel အလုပ်လုပ်နေရပါမယ်။</p>
 </section></main><script>
-const form=document.getElementById('form'),url=document.getElementById('driveUrl'),gen=document.getElementById('generateBtn'),status=document.getElementById('status'),dl=document.getElementById('download');let job='';
-form.onsubmit=async e=>{e.preventDefault();gen.disabled=true;status.textContent='GitHub Workflow စတင်နေပါတယ်…';dl.textContent='';try{let r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({drive_url:url.value.trim()})}),j=await r.json();if(!r.ok)throw Error(j.detail||'Generate failed');job=j.job_id;poll();}catch(x){status.textContent=x.message;gen.disabled=false;}};
+const form=document.getElementById('form'),url=document.getElementById('videoUrl'),gen=document.getElementById('generateBtn'),status=document.getElementById('status'),dl=document.getElementById('download');let job='';
+form.onsubmit=async e=>{e.preventDefault();gen.disabled=true;status.textContent='GitHub Workflow စတင်နေပါတယ်…';dl.textContent='';try{let r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video_url:url.value.trim()})}),j=await r.json();if(!r.ok)throw Error(j.detail||'Generate failed');job=j.job_id;poll();}catch(x){status.textContent=x.message;gen.disabled=false;}};
 async function poll(){try{let r=await fetch('/status/'+job),j=await r.json();status.textContent=j.message+'\\nStatus: '+j.status;if(j.status==='completed'){let a=document.createElement('a');a.href=j.download_url;a.textContent='မြန်မာစာတန်းထိုး Video Download';dl.replaceChildren(a);gen.disabled=false;return;}if(j.status==='failed'){status.textContent+='\\n'+(j.error||'Workflow failed');gen.disabled=false;return;}setTimeout(poll,5000);}catch(e){status.textContent='Status စစ်မရပါ: '+e.message;gen.disabled=false;}}
 </script></body></html>"""
 
@@ -101,12 +101,12 @@ def home(_: str = Depends(login)):
 async def generate(request: Request, _: str = Depends(login)):
     try:
         payload = await request.json()
-        drive_url = str(payload.get("drive_url", "")).strip()
+        video_url = str(payload.get("video_url", payload.get("drive_url", ""))).strip()
     except Exception:
-        raise HTTPException(400, "Google Drive URL ထည့်ပါ။")
-    parsed = urlparse(drive_url)
-    if parsed.scheme != "https" or parsed.hostname not in {"drive.google.com", "www.drive.google.com", "docs.google.com"}:
-        raise HTTPException(400, "Google Drive URL မှန်မှန်ထည့်ပါ။")
+        raise HTTPException(400, "Video URL ထည့်ပါ။")
+    parsed = urlparse(video_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise HTTPException(400, "မှန်ကန်တဲ့ http/https Video URL ထည့်ပါ။")
     job_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc).isoformat()
     jobs[job_id] = {"job_id": job_id, "status": "queued", "progress": 0,
@@ -114,7 +114,7 @@ async def generate(request: Request, _: str = Depends(login)):
                     "updated_at": now, "callback_token": secrets.token_urlsafe(32),
                     "download_url": None}
     base = public_base(request).rstrip("/")
-    inputs = {"job_id": job_id, "video_url": drive_url,
+    inputs = {"job_id": job_id, "video_url": video_url,
               "callback_url": f"{base}/callback/{job_id}",
               "callback_token": jobs[job_id]["callback_token"]}
     try:
@@ -122,7 +122,7 @@ async def generate(request: Request, _: str = Depends(login)):
     except Exception:
         patch_job(job_id, status="failed", message="Workflow မစတင်နိုင်ပါ။ GitHub Token/URL ကိုစစ်ပါ။")
         raise
-    patch_job(job_id, status="processing", message="Google Drive က Video ကိုယူပြီး စာတန်းထိုးနေပါတယ်…")
+    patch_job(job_id, status="processing", message="Video ကိုယူပြီး မြန်မာစာတန်းထိုးနေပါတယ်…")
     return {"job_id": job_id, "status": "processing"}
 
 
