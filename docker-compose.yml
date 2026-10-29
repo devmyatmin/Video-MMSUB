@@ -6,12 +6,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      APP_USERNAME: \${APP_USERNAME:?Set APP_USERNAME in .env}
-      APP_PASSWORD: \${APP_PASSWORD:?Set a strong APP_PASSWORD in .env}
+      APP_USERNAME: ${APP_USERNAME:?Set APP_USERNAME in .env}
+      APP_PASSWORD: ${APP_PASSWORD:?Set a strong APP_PASSWORD in .env}
+      GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-devmyatmin/Video-MMSUB}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:?Set GITHUB_TOKEN in .env}
+      GITHUB_WORKFLOW_FILE: ${GITHUB_WORKFLOW_FILE:-process-video.yml}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set public HTTPS URL in .env}
       DATA_DIR: /data
-      WHISPER_MODEL: \${WHISPER_MODEL:-small}
-      WHISPER_DEVICE: cpu
-      WHISPER_COMPUTE_TYPE: int8
     volumes:
       - video_mmsub_data:/data
 
