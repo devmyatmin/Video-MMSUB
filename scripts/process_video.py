@@ -125,13 +125,58 @@ def add_srt_track_to_video(source, srt_path, output):
         ass_path.unlink(missing_ok=True)
 
 
+def burn_srt_into_video(source, srt_path, output):
+    """Burn gold, size-30 subtitles into the video frames."""
+    source, srt_path, output = (
+        Path(source).resolve(), Path(srt_path).resolve(), Path(output).resolve()
+    )
+    if not srt_path.is_file() or not srt_path.stat().st_size:
+        raise RuntimeError("The supplied SRT file is missing or empty.")
+
+    read_srt_text(srt_path)
+    ass_path = output.with_suffix(".styled.ass")
+    try:
+        run(["ffmpeg", "-y", "-i", str(srt_path), "-c:s", "ass", str(ass_path)])
+        lines = ass_path.read_text(encoding="utf-8-sig").splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith("Style: Default,"):
+                fields = line[len("Style: "):].split(",")
+                if len(fields) >= 23:
+                    fields[1] = "Noto Sans Myanmar"
+                    fields[2] = "30"
+                    fields[3] = "&H0000D7FF"
+                    fields[4] = "&H0000D7FF"
+                    fields[5] = "&H00000000"
+                    fields[6] = "&H80000000"
+                    fields[16] = "2"
+                    fields[17] = "1"
+                    fields[18] = "2"
+                    fields[21] = "30"
+                    lines[i] = "Style: " + ",".join(fields)
+                break
+        else:
+            raise RuntimeError("Could not find the default style in converted ASS subtitles.")
+        ass_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        run([
+            "ffmpeg", "-y", "-i", str(source), "-vf", f"ass={ass_path}",
+            "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264",
+            "-preset", "veryfast", "-crf", "20", "-c:a", "copy",
+            "-movflags", "+faststart", str(output),
+        ])
+    finally:
+        ass_path.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 4 and sys.argv[1] == "transcribe":
         transcribe_to_srt(sys.argv[2], sys.argv[3])
     elif len(sys.argv) == 5 and sys.argv[1] in {"add-srt", "mux-srt"}:
         add_srt_track_to_video(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif len(sys.argv) == 5 and sys.argv[1] == "burn-srt":
+        burn_srt_into_video(sys.argv[2], sys.argv[3], sys.argv[4])
     else:
         raise SystemExit(
             "Usage: process_video.py transcribe INPUT_VIDEO OUTPUT_SRT | "
-            "add-srt INPUT_VIDEO INPUT_SRT OUTPUT_MKV"
+            "add-srt INPUT_VIDEO INPUT_SRT OUTPUT_MKV | "
+            "burn-srt INPUT_VIDEO INPUT_SRT OUTPUT_MP4"
         )
