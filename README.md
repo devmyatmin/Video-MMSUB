@@ -5,7 +5,7 @@ Password-protected web app hosted on your phone/Termux. Upload a video, press Ge
 ## How it works
 
 1. Termux runs the web app; expose it through a public HTTPS tunnel while you use it.
-2. The app accepts a video (up to 5 GiB), stores it on the phone, and returns a job ID.
+2. The workflow accepts downloaded input videos up to 10 GiB (10,737,418,240 bytes), subject to runner disk space and source URL support.
 3. Press Generate. The server dispatches `.github/workflows/process-video.yml` using a GitHub token stored only in the server environment.
 4. GitHub Actions downloads the one-time video URL, processes the video, and POSTs the output back to the phone's public callback URL.
 5. The web page shows a download link when processing completes.
@@ -57,7 +57,7 @@ If you use a 30-minute auto-stop timer, the phone server must remain online unti
 
 ## Limits and security
 
-- The app accepts at most 5 GiB per input and output. GitHub-hosted runner disk space, network speed, processing time, Actions usage limits, and the phone's free storage may impose lower practical limits.
+- The workflow rejects input videos larger than 10 GiB. This is a configured cap, not a guarantee that every 10 GiB video can be processed: GitHub-hosted runner disk space, network speed, processing time, Actions usage limits, and source URL support can impose lower practical limits. GitHub Releases also has per-file asset limits, so very large burned MP4 outputs may not publish successfully.
 - The phone needs enough free storage for the original and output video. Output files remain on the phone until manually deleted.
 - Job status is kept in memory. Restarting the app loses the page's job status even though files may remain on disk.
 - The one-time source URL and per-job callback token are secrets. The website password protects the user interface; the GitHub token must stay on the server.
