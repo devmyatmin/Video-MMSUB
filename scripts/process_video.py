@@ -30,6 +30,11 @@ def main(source, output):
          "-c:a", "pcm_s16le", str(audio)])
     model = WhisperModel("small", device="cpu", compute_type="int8")
     segments, _info = model.transcribe(str(audio), beam_size=5, vad_filter=True)
+    segments = list(segments)
+    if not segments:
+        # VAD can mistakenly discard quiet or noisy speech; retry without VAD.
+        segments, _info = model.transcribe(str(audio), beam_size=5, vad_filter=False)
+        segments = list(segments)
     translator = GoogleTranslator(source="auto", target="my")
     lines = []
     for segment in segments:
@@ -45,7 +50,7 @@ def main(source, output):
             f"{translated.strip()}\n"
         )
     if not lines:
-        raise RuntimeError("No speech text was detected in the video.")
+        raise RuntimeError("No speech text was detected, even after retrying without voice-activity filtering.")
     subtitles.write_text("\n".join(lines), encoding="utf-8")
     # Use a relative subtitle path to avoid filter parsing issues with absolute paths.
     escaped = str(subtitles).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
