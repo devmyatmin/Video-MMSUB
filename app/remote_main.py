@@ -125,7 +125,7 @@ def status(job_id: str, _: str = Depends(login)):
     return {k: v for k, v in job.items() if k not in {"callback_token", "source_token"}}
 
 @app.get("/download/{job_id}")
-def download(job_id: str, _: str = Depends(login)):
+def download(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Job မတွေ့ပါ။")
