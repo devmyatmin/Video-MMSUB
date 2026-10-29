@@ -28,39 +28,62 @@ def main(source, output):
     subtitles = work / "myanmar.srt"
     run(["ffmpeg", "-y", "-i", str(source), "-vn", "-ac", "1", "-ar", "16000",
          "-c:a", "pcm_s16le", str(audio)])
+
     model = WhisperModel("small", device="cpu", compute_type="int8")
-    # Auto-detect the spoken language. English and Japanese are the primary expected
-    # source languages, but leave detection automatic so other languages still work.
     segments, info = model.transcribe(
         str(audio), language=None, beam_size=5, vad_filter=True
     )
     detected_language = getattr(info, "language", "unknown")
     print(f"Detected source language: {detected_language}")
-    if detected_language in {"en", "ja"}:
-        print("Primary source language detected (English/Japanese).")
     segments = list(segments)
     if not segments:
-        # VAD can mistakenly discard quiet or noisy speech; retry without VAD.
-        segments, _info = model.transcribe(str(audio), beam_size=5, vad_filter=False)
+        segments, info = model.transcribe(
+            str(audio), language=None, beam_size=5, vad_filter=False
+        )
+        detected_language = getattr(info, "language", detected_language)
         segments = list(segments)
+    if not segments:
+        raise RuntimeError("Speech transcription returned no text.")
+
     translator = GoogleTranslator(source="auto", target="my")
     lines = []
+    translation_errors = []
     for segment in segments:
         original = segment.text.strip()
         if not original:
             continue
-        try:
-            translated = translator.translate(original) or original
-        except Exception:
-            translated = original
+        translated = None
+        last_error = None
+        # Retry translation instead of silently keeping the original-language text.
+        for attempt in range(3):
+            try:
+                translated = translator.translate(original)
+                if translated and translated.strip():
+                    break
+                last_error = "Translator returned an empty result"
+            except Exception as exc:
+                last_error = str(exc)
+        if not translated or not translated.strip():
+            translation_errors.append(f"{original[:100]}: {last_error}")
+            continue
+        translated = translated.strip()
+        # Do not accept an unchanged Latin-script line as a successful Burmese translation.
+        if detected_language in {"en", "ja"} and translated == original:
+            translation_errors.append(f"Translation unchanged: {original[:100]}")
+            continue
         lines.append(
             f"{len(lines) + 1}\n{srt_time(segment.start)} --> {srt_time(segment.end)}\n"
-            f"{translated.strip()}\n"
+            f"{translated}\n"
         )
+
     if not lines:
-        raise RuntimeError("No speech text was detected, even after retrying without voice-activity filtering.")
+        detail = "; ".join(translation_errors[:3])
+        raise RuntimeError(
+            "Myanmar translation failed; refusing to publish an unsubtitled/original-language video. "
+            + detail
+        )
+
     subtitles.write_text("\n".join(lines), encoding="utf-8")
-    # Use a relative subtitle path to avoid filter parsing issues with absolute paths.
     escaped = str(subtitles).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
     vf = f"subtitles='{escaped}':force_style='FontName=Noto Sans Myanmar,FontSize=22,Outline=2,Shadow=1,Alignment=2,MarginV=28'"
     run(["ffmpeg", "-y", "-i", str(source), "-vf", vf, "-c:v", "libx264",
