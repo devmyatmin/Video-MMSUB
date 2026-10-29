@@ -54,7 +54,7 @@ jobs:
           if u.scheme != "https" or u.hostname not in {"drive.google.com", "www.drive.google.com", "docs.google.com"}:
               raise SystemExit("Only Google Drive share URLs are accepted")
           PY
-          gdown --fuzzy "$VIDEO_URL" -O input-video
+          gdown "$VIDEO_URL" -O input-video
       - name: Transcribe, translate and burn subtitles
         run: python scripts/process_video.py input-video output.mp4
       - name: Send output back to the phone server
