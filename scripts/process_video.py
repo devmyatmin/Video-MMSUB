@@ -42,9 +42,9 @@ def transcribe_to_srt(source, output_srt):
     if not entries:
         raise RuntimeError("Speech transcription returned no usable text.")
 
-    blocks = [f"{i}\\n{start} --> {end}\\n{text}\\n"
+    blocks = [f"{i}\n{start} --> {end}\n{text}\n"
               for i, (start, end, text) in enumerate(entries, 1)]
-    output_srt.write_text("\\n".join(blocks), encoding="utf-8")
+    output_srt.write_text("\n".join(blocks), encoding="utf-8")
     audio.unlink(missing_ok=True)
     print(
         f"Created source-language SRT with {len(entries)} entries; "
@@ -54,9 +54,9 @@ def transcribe_to_srt(source, output_srt):
 
 def read_srt_text(path):
     raw = path.read_bytes()
-    if raw.startswith(b"\\xef\\xbb\\xbf"):
+    if raw.startswith(b"\xef\xbb\xbf"):
         text, encoding = raw.decode("utf-8-sig"), "UTF-8 with BOM"
-    elif raw.startswith((b"\\xff\\xfe", b"\\xfe\\xff")):
+    elif raw.startswith((b"\xff\xfe", b"\xfe\xff")):
         text, encoding = raw.decode("utf-16"), "UTF-16 with BOM"
     else:
         try:
@@ -76,7 +76,7 @@ def normalize_myanmar_srt(text):
     candidate_lines = [
         line for line in lines
         if "-->" not in line and not line.strip().isdigit()
-        and any("\\u1000" <= ch <= "\\u109f" for ch in line)
+        and any("\u1000" <= ch <= "\u109f" for ch in line)
     ]
     candidate = " ".join(line.strip() for line in candidate_lines)
     if not candidate.strip():
@@ -112,13 +112,13 @@ def burn_srt_into_video(source, srt_path, output):
     subtitle_text = read_srt_text(srt_path)
     if "-->" not in subtitle_text:
         raise RuntimeError("The supplied file does not look like an SRT (missing -->).")
-    subtitle_text = subtitle_text.replace("\\r\\n", "\\n").replace("\\r", "\\n")
+    subtitle_text = subtitle_text.replace("\r\n", "\n").replace("\r", "\n")
     subtitle_text = normalize_myanmar_srt(subtitle_text)
     srt_path.write_text(subtitle_text, encoding="utf-8")
 
     escaped = (
-        str(srt_path).replace("\\\\", "\\\\\\\\")
-        .replace(":", "\\\\:").replace("'", "\\\\'")
+        str(srt_path).replace("\\", "\\\\")
+        .replace(":", "\\:").replace("'", "\\'")
     )
     vf = (
         f"subtitles='{escaped}':"
