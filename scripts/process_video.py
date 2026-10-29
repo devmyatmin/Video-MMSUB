@@ -87,7 +87,7 @@ def add_srt_track_to_video(source, srt_path, output):
     # without re-encoding, leaving Myanmar glyph shaping to the video player.
     run([
         "ffmpeg", "-y", "-i", str(source), "-i", str(srt_path),
-        "-map", "0", "-map", "1:0",
+        "-map", "0:v:0", "-map", "0:a?", "-map", "1:0",
         "-c", "copy", "-c:s", "mov_text",
         "-metadata:s:s:0", "language=und",
         "-metadata:s:s:0", "title=Subtitles",
