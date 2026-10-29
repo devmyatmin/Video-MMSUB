@@ -1,6 +1,6 @@
 # Video MMSUB
 
-Password-protected web app hosted on your phone/Termux. Upload a video, press Generate, and GitHub Actions downloads the video through a one-time URL, transcribes and translates speech to Burmese, burns subtitles into an MP4, then uploads the result back to the phone server.
+Password-protected web app hosted on your phone/Termux. Upload a video, press Generate, and GitHub Actions downloads the video through a one-time URL, transcribes speech in the detected source language into SRT, or adds a supplied SRT as a selectable subtitle track in MP4, then uploads the result back to the phone server.
 
 ## How it works
 
