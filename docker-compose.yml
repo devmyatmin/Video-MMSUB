@@ -1,0 +1,19 @@
+services:
+  video-mmsub:
+    build: .
+    container_name: video-mmsub
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      APP_USERNAME: \${APP_USERNAME:?Set APP_USERNAME in .env}
+      APP_PASSWORD: \${APP_PASSWORD:?Set a strong APP_PASSWORD in .env}
+      DATA_DIR: /data
+      WHISPER_MODEL: \${WHISPER_MODEL:-small}
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE_TYPE: int8
+    volumes:
+      - video_mmsub_data:/data
+
+volumes:
+  video_mmsub_data:
